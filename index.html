@@ -206,7 +206,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
     <div id="syncForm" class="export" style="padding:0">
       <div class="field">
         <label for="syncRepo">Repozytorium na dane</label>
-        <input id="syncRepo" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" value="kubask212/czas-pracy-dane">
+        <input id="syncRepo" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" value="kubask212/czas-pracy-zuzy">
       </div>
       <div class="field">
         <label for="syncToken">Klucz dostępu (token z GitHuba)</label>
@@ -737,7 +737,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
 
   async function connect() {
     const cfg = { repo: $("syncRepo").value.trim().replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "").replace(/\/$/, ""), token: $("syncToken").value.trim() };
-    if (!/^[\w.-]+\/[\w.-]+$/.test(cfg.repo)) { snote("Wpisz repozytorium w formie użytkownik/nazwa, np. kubask212/czas-pracy-dane.", "err"); return; }
+    if (!/^[\w.-]+\/[\w.-]+$/.test(cfg.repo)) { snote("Wpisz repozytorium w formie użytkownik/nazwa, np. kubask212/czas-pracy-zuzy.", "err"); return; }
     if (!cfg.token) { snote("Wklej klucz dostępu z GitHuba.", "err"); return; }
     snote("Łączę z GitHubem…");
     try {
