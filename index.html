@@ -165,13 +165,6 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
     </div>
   </div>
 
-  <div class="warn" id="backupWarn" hidden>
-    <div><b>Zrób kopię zapasową.</b> <span id="backupWarnText"></span> Wyślij ją sobie mailem albo zapisz w Plikach – chroni godziny przy zmianie telefonu lub usunięciu apki.</div>
-    <div class="warn-row">
-      <button type="button" id="backupNow">Zrób kopię teraz</button>
-    </div>
-  </div>
-
   <div class="actions" id="actions"></div>
 
   <label class="wake" for="wakeToggle">
@@ -207,15 +200,25 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
     <div class="note" id="exportNote"></div>
   </div>
 
-  <h2>Kopia zapasowa</h2>
+  <h2>Zapis na GitHubie</h2>
   <div class="panel export">
-    <p class="hint" style="margin:0">Godziny są zapisane tylko w tym telefonie. Raz na jakiś czas wyślij sobie kopię (np. mailem) – przyda się przy zmianie telefonu.</p>
-    <div class="row2">
-      <button type="button" class="btn ghost" id="backup">Zapisz kopię</button>
-      <button type="button" class="btn ghost" id="restoreBtn">Wczytaj kopię</button>
+    <p class="hint" style="margin:0" id="syncStatus">Nie połączono – godziny są tylko w tym telefonie.</p>
+    <div id="syncForm" class="export" style="padding:0">
+      <div class="field">
+        <label for="syncRepo">Repozytorium na dane</label>
+        <input id="syncRepo" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" value="kubask212/czas-pracy-dane">
+      </div>
+      <div class="field">
+        <label for="syncToken">Klucz dostępu (token z GitHuba)</label>
+        <input id="syncToken" type="password" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off" placeholder="github_pat_…">
+      </div>
+      <button type="button" class="btn end" id="syncConnect">Połącz</button>
     </div>
-    <input type="file" id="restore" accept=".json,application/json" hidden>
-    <div class="note" id="backupNote"></div>
+    <div class="row2" id="syncButtons" hidden>
+      <button type="button" class="btn ghost" id="syncNow">Zapisz teraz</button>
+      <button type="button" class="btn ghost" id="syncOff">Odłącz</button>
+    </div>
+    <div class="note" id="syncNote"></div>
   </div>
 
   <p class="store" id="storeInfo">Dane zapisane w tym telefonie.</p>
@@ -256,7 +259,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
   // paused: przerwa w trakcie dnia; overrides: ręczne korekty {"2026-10-29": {min, from, to}}
   const LS_KEY = "czas-pracy-v1";
   const RETENTION_MONTHS = 3;
-  let state = { sessions: [], current: null, paused: false, overrides: {}, name: "", lastBackup: 0, updatedAt: 0 };
+  let state = { sessions: [], current: null, paused: false, overrides: {}, name: "", updatedAt: 0 };
 
   const $ = (id) => document.getElementById(id);
   const pad = (n) => String(n).padStart(2, "0");
@@ -288,7 +291,6 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
       paused: !!(s && s.paused),
       overrides: (s && typeof s.overrides === "object" && s.overrides) || {},
       name: (s && typeof s.name === "string") ? s.name : "",
-      lastBackup: (s && typeof s.lastBackup === "number") ? s.lastBackup : 0,
       updatedAt: (s && s.updatedAt) || 0,
     };
   }
@@ -362,7 +364,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
   }
   function pause() { closeCurrent(Date.now()); state.paused = true; commit(); }
   function resume() { state.current = Date.now(); state.paused = false; commit(); }
-  function end() { closeCurrent(Date.now()); state.paused = false; commit(); }
+  function end() { closeCurrent(Date.now()); state.paused = false; commit(); pushSync(); }
 
   // ---------- widok ----------
   const ICONS = {
@@ -408,12 +410,6 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
       w.hidden = false;
       $("warnText").innerHTML = `<b>Licznik działa od ${fromYesterday ? "wczoraj" : hhmm(state.current)}.</b> Zapomniałaś stuknąć „Koniec pracy”? Zakończ go i popraw godziny tamtego dnia.`;
     } else w.hidden = true;
-    // przypomnienie o kopii: są godziny z co najmniej 2 różnych dni i ostatnia kopia > 7 dni temu
-    const workedDays = new Set(state.sessions.map(x => dayKey(new Date(x.s)))).size;
-    const backupAge = state.lastBackup ? Math.floor((now - state.lastBackup) / 86400000) : null;
-    const needBackup = workedDays >= 2 && (backupAge == null || backupAge >= 7);
-    $("backupWarn").hidden = !needBackup;
-    if (needBackup) $("backupWarnText").textContent = backupAge == null ? "Nie było jeszcze żadnej kopii." : `Ostatnia kopia ${backupAge} dni temu.`;
     renderActions();
     $("sYest").textContent = hm(summarize(addDays(today, -1), addDays(today, -1), now)[0].minutes);
     $("sWeek").textContent = hm(sumMin(weekStart(today), today, now));
@@ -486,6 +482,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
     renderDays();
     renderMonths();
     if (document.activeElement !== $("name")) $("name").value = state.name;
+    renderSync();
     tick();
   }
 
@@ -537,8 +534,9 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
     state.overrides[k] = entry;
     closeFix();
     commit();
+    pushSync();
   }
-  function removeFix() { delete state.overrides[$("fixDate").value]; closeFix(); commit(); }
+  function removeFix() { delete state.overrides[$("fixDate").value]; closeFix(); commit(); pushSync(); }
   function closeFix() { $("sheetBg").hidden = true; }
 
   // ---------- minimalny ZIP (bez kompresji) – xlsx to zwykły zip z plikami XML ----------
@@ -658,23 +656,118 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
     } catch (e) { note("Nie udało się przygotować pliku. Użyj „Kopiuj tabelę”.", "err"); }
   }
 
-  function bnote(text, kind) { const n = $("backupNote"); n.textContent = text; n.className = "note" + (kind ? " " + kind : ""); }
-  async function backup() {
-    const d = new Date();
-    const blob = new Blob([JSON.stringify(state, null, 1)], { type: "application/json" });
-    if (await shareOrSave(blob, `czas-pracy-kopia-${dayKey(d)}.json`, bnote)) { state.lastBackup = Date.now(); commit(); }
+  // ---------- zapis na GitHubie ----------
+  // Klucz i nazwa repozytorium są tylko w tym telefonie (osobny wpis w pamięci), nigdy w kodzie strony.
+  const SYNC_KEY = LS_KEY + "-github";
+  const SYNC_FILE = "godziny.json";
+  let sync = {};
+  try { sync = JSON.parse(localStorage.getItem(SYNC_KEY)) || {}; } catch (e) { sync = {}; }
+  const saveSync = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (e) {} };
+  const syncOn = () => !!(sync.token && sync.repo);
+  let syncing = false;
+
+  const b64enc = (str) => { const b = new TextEncoder().encode(str); let bin = ""; for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(bin); };
+  const b64dec = (str) => new TextDecoder().decode(Uint8Array.from(atob(str.replace(/\s/g, "")), (c) => c.charCodeAt(0)));
+  const hasData = (st) => st.sessions.length > 0 || Object.keys(st.overrides).length > 0 || st.current != null;
+
+  function gh(method, body, cfg) {
+    cfg = cfg || sync;
+    return fetch(`https://api.github.com/repos/${cfg.repo}/contents/${SYNC_FILE}`, {
+      method, cache: "no-store",
+      headers: Object.assign({ Authorization: `Bearer ${cfg.token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" }, body ? { "Content-Type": "application/json" } : {}),
+      body: body ? JSON.stringify(body) : undefined,
+    });
   }
-  function restore(file) {
-    const r = new FileReader();
-    r.onload = () => {
-      try {
-        const s = normalize(JSON.parse(r.result));
-        if (!s.sessions.length && !Object.keys(s.overrides).length && s.current == null) throw new Error("empty");
-        state = s; lastMode = null; commit();
-        bnote(`Wczytano kopię: ${s.sessions.length} odcinków pracy.`, "ok");
-      } catch (e) { bnote("To nie jest plik kopii z tej aplikacji.", "err"); }
-    };
-    r.readAsText(file);
+  function syncError(e) {
+    if (e && e.status === 401) return "Klucz jest nieprawidłowy albo wygasł. Wygeneruj nowy na GitHubie i połącz jeszcze raz.";
+    if (e && (e.status === 403 || e.status === 404)) return "Klucz nie ma dostępu do tego repozytorium. Sprawdź nazwę repozytorium i uprawnienie „Contents: Read and write”.";
+    if (e && e.status === 409) return "Konflikt zapisu – spróbuj „Zapisz teraz” jeszcze raz.";
+    return "Brak połączenia z GitHubem. Godziny są bezpieczne w telefonie, zapiszę je przy następnej okazji.";
+  }
+  function snote(text, kind) { const n = $("syncNote"); n.textContent = text; n.className = "note" + (kind ? " " + kind : ""); }
+  function whenText(ms) {
+    if (!ms) return "jeszcze nie";
+    const d = new Date(ms), today = new Date();
+    const day = dayKey(d) === dayKey(today) ? "dziś" : dayKey(d) === dayKey(addDays(today, -1)) ? "wczoraj" : `${pad(d.getDate())}.${pad(d.getMonth() + 1)}`;
+    return `${day} ${hhmm(ms)}`;
+  }
+  function renderSync() {
+    const on = syncOn();
+    $("syncForm").hidden = on;
+    $("syncButtons").hidden = !on;
+    if (on) {
+      const pending = state.updatedAt > (sync.savedUpdate || 0);
+      $("syncStatus").textContent = `Połączono z ${sync.repo}. Ostatni zapis: ${whenText(sync.lastSync)}${pending ? " · są nowe zmiany do zapisania" : ""}.`;
+      $("storeInfo").textContent = "Godziny są w telefonie i na GitHubie.";
+    } else {
+      $("syncStatus").textContent = "Nie połączono – godziny są tylko w tym telefonie.";
+      $("storeInfo").textContent = "Dane zapisane w tym telefonie.";
+    }
+  }
+  const dataOnly = () => ({ sessions: state.sessions, current: state.current, paused: state.paused, overrides: state.overrides, name: state.name, updatedAt: state.updatedAt });
+
+  async function pushSync() {
+    if (!syncOn() || syncing) return;
+    syncing = true;
+    snote("Zapisuję na GitHubie…");
+    try {
+      let sha;
+      const g = await gh("GET");
+      if (g.status === 200) sha = (await g.json()).sha;
+      else if (g.status !== 404) throw g;
+      const body = { message: `Godziny – ${dayKey(new Date())} ${hhmm(Date.now())}`, content: b64enc(JSON.stringify(dataOnly(), null, 1)) };
+      if (sha) body.sha = sha;
+      const r = await gh("PUT", body);
+      if (!r.ok) throw r;
+      sync.lastSync = Date.now();
+      sync.savedUpdate = state.updatedAt;
+      saveSync();
+      snote("Zapisano na GitHubie.", "ok");
+    } catch (e) {
+      snote(syncError(e), "err");
+    } finally {
+      syncing = false;
+      renderSync();
+    }
+  }
+  // raz dziennie, jeśli coś się zmieniło (dodatkowo zapis po „Koniec pracy” i po korekcie)
+  function maybeSync() {
+    if (syncOn() && state.updatedAt > (sync.savedUpdate || 0) && Date.now() - (sync.lastSync || 0) > 20 * 3600000) pushSync();
+  }
+
+  async function connect() {
+    const cfg = { repo: $("syncRepo").value.trim().replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "").replace(/\/$/, ""), token: $("syncToken").value.trim() };
+    if (!/^[\w.-]+\/[\w.-]+$/.test(cfg.repo)) { snote("Wpisz repozytorium w formie użytkownik/nazwa, np. kubask212/czas-pracy-dane.", "err"); return; }
+    if (!cfg.token) { snote("Wklej klucz dostępu z GitHuba.", "err"); return; }
+    snote("Łączę z GitHubem…");
+    try {
+      const g = await gh("GET", null, cfg);
+      let remote = null;
+      if (g.status === 200) remote = normalize(JSON.parse(b64dec((await g.json()).content)));
+      else if (g.status !== 404) throw g;
+      sync = { repo: cfg.repo, token: cfg.token, lastSync: 0, savedUpdate: 0 };
+      if (remote && hasData(remote) && (!hasData(state) || remote.updatedAt > state.updatedAt)) {
+        // nowy telefon albo ponowna instalacja – bierzemy godziny z GitHuba
+        state = remote; lastMode = null;
+        sync.lastSync = Date.now(); sync.savedUpdate = state.updatedAt;
+        saveSync(); saveLocal(); render();
+        snote(`Połączono. Wczytano godziny z GitHuba (${state.sessions.length} odcinków pracy).`, "ok");
+      } else {
+        saveSync();
+        $("syncToken").value = "";
+        await pushSync();
+        if ($("syncNote").className.indexOf("err") < 0) snote("Połączono. Godziny zapisane na GitHubie.", "ok");
+        else { sync = {}; saveSync(); }
+      }
+    } catch (e) {
+      sync = {}; saveSync();
+      snote(syncError(e), "err");
+    }
+    renderSync();
+  }
+  function disconnect() {
+    if (!window.confirm("Odłączyć zapis na GitHubie? Godziny zostaną w telefonie, a te już zapisane na GitHubie nie znikną.")) return;
+    sync = {}; saveSync(); snote(""); renderSync();
   }
 
   function tableText(ym) {
@@ -737,14 +830,13 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("sheetBg").hidden) closeFix(); });
   $("xlsx").addEventListener("click", exportXlsx);
   $("copy").addEventListener("click", copyTable);
-  $("backup").addEventListener("click", backup);
-  $("backupNow").addEventListener("click", backup);
-  $("restoreBtn").addEventListener("click", () => $("restore").click());
-  $("restore").addEventListener("change", (e) => { const f = e.target.files[0]; if (f) restore(f); e.target.value = ""; });
+  $("syncConnect").addEventListener("click", connect);
+  $("syncNow").addEventListener("click", pushSync);
+  $("syncOff").addEventListener("click", disconnect);
   let nameTimer = null;
   $("name").addEventListener("input", () => { clearTimeout(nameTimer); nameTimer = setTimeout(() => { state.name = $("name").value; commit(); }, 800); });
   $("wakeToggle").addEventListener("change", applyWake);
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { render(); applyWake(); } });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { render(); applyWake(); maybeSync(); } });
 
   // ---------- start ----------
   const local = loadLocal();
@@ -758,6 +850,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
   const standalone = window.navigator.standalone === true || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
   $("installInfo").hidden = standalone;
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  maybeSync();
   if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
 })();
 </script>
