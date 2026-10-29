@@ -1,8 +1,13 @@
 {
- "sessions": [],
- "current": 1793283920398,
+ "sessions": [
+  {
+   "s": 1793283920398,
+   "e": 1793286237058
+  }
+ ],
+ "current": null,
  "paused": false,
  "overrides": {},
  "name": "",
- "updatedAt": 1793283920398
+ "updatedAt": 1793286237058
 }
