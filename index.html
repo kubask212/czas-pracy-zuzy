@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Czas pracy</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Czas pracy">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1e3a5f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<style>
+/* Układ: jedna kolumna jak w aplikacji telefonu – granatowa karta z licznikiem, duże przyciski pod kciukiem, potem statystyki, lista dni, eksport. */
+:root {
+  --bg: #eef2f7;
+  --card: #ffffff;
+  --line: #d9e0ea;
+  --fg: #1c2633;
+  --muted: #667387;
+  --navy: #1e3a5f;
+  --navy-2: #2a4d78;
+  --on-navy: #ffffff;
+  --on-navy-muted: #a9bdd6;
+  --go: #15934a;
+  --go-soft: #e3f4ea;
+  --pause: #c96a05;
+  --pause-soft: #fbeedd;
+  --excel: #1d6f42;
+  --warn-bg: #fff4e0;
+  --warn-fg: #7a4300;
+  --font-num: -apple-system, "SF Pro Display", system-ui, "Segoe UI", sans-serif;
+  --font-body: -apple-system, "SF Pro Text", system-ui, "Segoe UI", sans-serif;
+  --r: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151d; --card: #18212c; --line: #2a3644; --fg: #e6ecf3; --muted: #93a1b3;
+    --navy: #1b3352; --navy-2: #26476f; --on-navy: #ffffff; --on-navy-muted: #9fb5d1;
+    --go: #22b25c; --go-soft: #173525; --pause: #e88a26; --pause-soft: #3a2a17; --excel: #2b8a55;
+    --warn-bg: #3a2a17; --warn-fg: #f6c98a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151d; --card: #18212c; --line: #2a3644; --fg: #e6ecf3; --muted: #93a1b3;
+  --navy: #1b3352; --navy-2: #26476f; --on-navy: #ffffff; --on-navy-muted: #9fb5d1;
+  --go: #22b25c; --go-soft: #173525; --pause: #e88a26; --pause-soft: #3a2a17; --excel: #2b8a55;
+  --warn-bg: #3a2a17; --warn-fg: #f6c98a; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+[hidden] { display: none !important; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 16px; line-height: 1.4;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  margin: 0;
+  padding-top: calc(16px + env(safe-area-inset-top, 0px)); padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+  -webkit-tap-highlight-color: transparent;
+}
+.app { max-width: 520px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+button, select, input { font: inherit; color: inherit; }
+button { cursor: pointer; border: 0; }
+button:focus-visible, select:focus-visible, input:focus-visible, .day:focus-visible { outline: 3px solid var(--navy-2); outline-offset: 2px; }
+.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+
+/* ---------- licznik ---------- */
+.hero { background: var(--navy); color: var(--on-navy); border-radius: 20px; padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 4px; }
+.hero-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--on-navy-muted); }
+.pill { font-size: 12px; font-weight: 700; letter-spacing: .06em; padding: 5px 12px; border-radius: 999px; background: rgba(255,255,255,.14); color: var(--on-navy); white-space: nowrap; }
+.pill.go { background: var(--go); }
+.pill.pause { background: var(--pause); }
+.clock { font-family: var(--font-num); font-weight: 200; font-size: clamp(56px, 19vw, 84px); line-height: 1.05; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.sub { color: var(--on-navy-muted); font-size: 15px; min-height: 1.4em; }
+
+/* ---------- przyciski ---------- */
+.actions { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
+.btn { border-radius: var(--r); padding: 18px 12px; font-size: 18px; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 64px; transition: transform .08s; }
+.btn:active { transform: scale(.98); }
+.btn.full { grid-column: 1 / -1; }
+.btn.start { background: var(--go); color: #fff; font-size: 21px; min-height: 76px; }
+.btn.end { background: var(--navy); color: var(--on-navy); }
+.btn.pause { background: var(--pause-soft); color: var(--pause); }
+.btn.resume { background: var(--go-soft); color: var(--go); }
+.btn.ghost { background: var(--card); border: 1px solid var(--line); color: var(--fg); font-size: 16px; min-height: 52px; padding: 12px; }
+.btn.excel { background: var(--excel); color: #fff; font-size: 16px; min-height: 52px; padding: 12px; }
+.btn[disabled] { opacity: .5; cursor: default; }
+.ico { width: 20px; height: 20px; flex: none; }
+
+.warn { background: var(--warn-bg); color: var(--warn-fg); border-radius: var(--r); padding: 12px 14px; font-size: 15px; display: flex; flex-direction: column; gap: 8px; }
+.warn b { font-weight: 700; }
+.warn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.warn-row button { background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; font-weight: 600; font-size: 14px; }
+
+.wake { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 15px; color: var(--muted); padding: 0 4px; }
+.switch { position: relative; width: 50px; height: 30px; flex: none; }
+.switch input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.switch span { position: absolute; inset: 0; border-radius: 999px; background: var(--line); transition: background .15s; pointer-events: none; }
+.switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .15s; }
+.switch input:checked + span { background: var(--go); }
+.switch input:checked + span::after { transform: translateX(20px); }
+.switch input:focus-visible + span { outline: 3px solid var(--navy-2); outline-offset: 2px; }
+
+/* ---------- statystyki ---------- */
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; min-width: 0; }
+.stat .k { font-size: 13px; color: var(--muted); }
+.stat .v { font-family: var(--font-num); font-weight: 600; font-size: 22px; color: var(--fg); font-variant-numeric: tabular-nums; }
+
+/* ---------- sekcje ---------- */
+h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.days { list-style: none; margin: 0; padding: 0; }
+.day { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 12px 14px; border-top: 1px solid var(--line); width: 100%; text-align: left; background: none; align-items: center; }
+.days li:first-child .day { border-top: 0; }
+.day .when { font-weight: 600; }
+.day .when small { font-weight: 400; color: var(--muted); font-size: 14px; margin-left: 6px; }
+.day .range { color: var(--muted); font-size: 14px; grid-column: 1; }
+.day .dur { grid-row: 1 / span 2; grid-column: 2; font-family: var(--font-num); font-weight: 600; font-size: 19px; font-variant-numeric: tabular-nums; text-align: right; }
+.day .dur em { display: block; font-style: normal; font-family: var(--font-body); font-weight: 600; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--pause); }
+.day.today .when { color: var(--go); }
+.day.weekend .when { color: var(--muted); }
+.empty { padding: 22px 16px; color: var(--muted); text-align: center; }
+.hint { color: var(--muted); font-size: 14px; margin: 0 4px; }
+
+.export { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 14px; color: var(--muted); }
+.field select, .field input { width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); min-height: 48px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.note { font-size: 14px; color: var(--muted); min-height: 1.2em; }
+.note.ok { color: var(--go); }
+.note.err { color: var(--pause); }
+.store { font-size: 13px; color: var(--muted); text-align: center; }
+
+/* ---------- okno korekty ---------- */
+[hidden] { display: none !important; }
+.sheet-bg { position: fixed; inset: 0; background: rgba(10,18,28,.45); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
+.sheet { background: var(--card); width: 100%; max-width: 520px; border-radius: 20px 20px 0 0; padding: 20px max(18px, env(safe-area-inset-left, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) max(18px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 14px; max-height: 90vh; overflow-y: auto; }
+.sheet h3 { margin: 0; font-size: 20px; }
+.sheet p { margin: 0; color: var(--muted); font-size: 15px; }
+.measured { font-family: var(--font-num); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <section class="hero" aria-live="polite">
+    <div class="hero-top">
+      <span class="eyebrow" id="eyebrow">Dziś przepracowano</span>
+      <span class="pill" id="pill">NIE LICZY</span>
+    </div>
+    <div class="clock" id="clock">0:00:00</div>
+    <div class="sub" id="sub">Naciśnij „Start pracy”, gdy zaczynasz.</div>
+  </section>
+
+  <div class="warn" id="warn" hidden>
+    <div id="warnText"></div>
+    <div class="warn-row">
+      <button type="button" id="warnFix">Popraw ten dzień</button>
+      <button type="button" id="warnEnd">Zakończ teraz</button>
+    </div>
+  </div>
+
+  <div class="actions" id="actions"></div>
+
+  <label class="wake" for="wakeToggle">
+    <span>Nie wygaszaj ekranu, gdy aplikacja jest otwarta</span>
+    <span class="switch"><input type="checkbox" id="wakeToggle"><span></span></span>
+  </label>
+
+  <div class="stats">
+    <div class="stat"><div class="k">Wczoraj</div><div class="v" id="sYest">0:00</div></div>
+    <div class="stat"><div class="k">Ten tydzień</div><div class="v" id="sWeek">0:00</div></div>
+    <div class="stat"><div class="k">Ten miesiąc</div><div class="v" id="sMonth">0:00</div></div>
+  </div>
+
+  <h2>Ostatnie dni</h2>
+  <div class="panel"><ul class="days" id="days"></ul></div>
+  <p class="hint">Stuknij dzień, żeby poprawić godziny albo dopisać pracę bez telefonu.</p>
+  <button type="button" class="btn ghost" id="addDay">Dodaj lub popraw inny dzień</button>
+
+  <h2>Rozliczenie miesiąca</h2>
+  <div class="panel export">
+    <div class="field">
+      <label for="month">Miesiąc</label>
+      <select id="month"></select>
+    </div>
+    <div class="field">
+      <label for="name">Imię i nazwisko (pojawi się w pliku)</label>
+      <input id="name" type="text" autocomplete="name" placeholder="np. Zuzanna Kowalska">
+    </div>
+    <div class="row2">
+      <button type="button" class="btn excel" id="xlsx">Wyślij Excel</button>
+      <button type="button" class="btn ghost" id="copy">Kopiuj tabelę</button>
+    </div>
+    <div class="note" id="exportNote"></div>
+  </div>
+
+  <h2>Kopia zapasowa</h2>
+  <div class="panel export">
+    <p class="hint" style="margin:0">Godziny są zapisane tylko w tym telefonie. Raz na jakiś czas wyślij sobie kopię (np. mailem) – przyda się przy zmianie telefonu.</p>
+    <div class="row2">
+      <button type="button" class="btn ghost" id="backup">Zapisz kopię</button>
+      <button type="button" class="btn ghost" id="restoreBtn">Wczytaj kopię</button>
+    </div>
+    <input type="file" id="restore" accept=".json,application/json" hidden>
+    <div class="note" id="backupNote"></div>
+  </div>
+
+  <p class="store" id="storeInfo">Dane zapisane w tym telefonie.</p>
+  <p class="store" id="installInfo" hidden>Wskazówka: w Safari stuknij <b>Udostępnij</b> → <b>Do ekranu początkowego</b>. Wtedy aplikacja ma własną ikonkę, a dane są bezpieczne.</p>
+</div>
+
+<div class="sheet-bg" id="sheetBg" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <h3 id="sheetTitle">Popraw dzień</h3>
+    <p>Wpisz, ile faktycznie pracowałaś tego dnia. Zastąpi to zmierzony czas w podsumowaniach i w Excelu.</p>
+    <div class="field">
+      <label for="fixDate">Dzień</label>
+      <input id="fixDate" type="date">
+    </div>
+    <p>Zmierzono: <span class="measured" id="fixMeasured">0:00</span></p>
+    <div class="row2">
+      <div class="field"><label for="fixFrom">Od</label><input id="fixFrom" type="time"></div>
+      <div class="field"><label for="fixTo">Do</label><input id="fixTo" type="time"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label for="fixH">Godziny</label><input id="fixH" type="number" inputmode="numeric" min="0" max="24"></div>
+      <div class="field"><label for="fixM">Minuty</label><input id="fixM" type="number" inputmode="numeric" min="0" max="59"></div>
+    </div>
+    <p class="note" id="fixNote">„Od” i „Do” policzą godziny same. Możesz też wpisać sam czas.</p>
+    <div class="row2">
+      <button type="button" class="btn ghost" id="fixCancel">Anuluj</button>
+      <button type="button" class="btn end" id="fixSave">Zapisz</button>
+    </div>
+    <button type="button" class="btn ghost" id="fixRemove">Przywróć zmierzony czas</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  // ---------- stan ----------
+  // sessions: zamknięte odcinki pracy [{s, e}] (ms); current: start bieżącego odcinka albo null;
+  // paused: przerwa w trakcie dnia; overrides: ręczne korekty {"2026-10-29": {min, from, to}}
+  const LS_KEY = "czas-pracy-v1";
+  const RETENTION_MONTHS = 3;
+  let state = { sessions: [], current: null, paused: false, overrides: {}, name: "", updatedAt: 0 };
+
+  const $ = (id) => document.getElementById(id);
+  const pad = (n) => String(n).padStart(2, "0");
+  const DAYS = ["niedziela", "poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota"];
+  const MONTHS = ["styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec", "lipiec", "sierpień", "wrzesień", "październik", "listopad", "grudzień"];
+
+  const dayKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const keyToDate = (k) => { const [y, m, d] = k.split("-").map(Number); return new Date(y, m - 1, d); };
+  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+  const hm = (min) => `${Math.floor(min / 60)}:${pad(min % 60)}`;
+  const hms = (sec) => { sec = Math.max(0, Math.floor(sec)); return `${Math.floor(sec / 3600)}:${pad(Math.floor(sec / 60) % 60)}:${pad(sec % 60)}`; };
+  const hhmm = (ms) => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  const isWeekend = (d) => d.getDay() === 0 || d.getDay() === 6;
+  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+  // ---------- zapis ----------
+  function loadLocal() {
+    try { const raw = localStorage.getItem(LS_KEY); if (raw) return JSON.parse(raw); } catch (e) {}
+    return null;
+  }
+  function saveLocal() {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {}
+  }
+  function normalize(s) {
+    return {
+      sessions: Array.isArray(s && s.sessions) ? s.sessions.filter(x => x && x.e > x.s) : [],
+      current: s && typeof s.current === "number" ? s.current : null,
+      paused: !!(s && s.paused),
+      overrides: (s && typeof s.overrides === "object" && s.overrides) || {},
+      name: (s && typeof s.name === "string") ? s.name : "",
+      updatedAt: (s && s.updatedAt) || 0,
+    };
+  }
+  function commit() {
+    state.updatedAt = Date.now();
+    prune();
+    saveLocal();
+    render();
+  }
+  function prune() {
+    const now = new Date();
+    const cutoff = new Date(now.getFullYear(), now.getMonth() - RETENTION_MONTHS, 1).getTime();
+    state.sessions = state.sessions.filter(x => x.e >= cutoff);
+    for (const k of Object.keys(state.overrides)) if (keyToDate(k).getTime() < cutoff) delete state.overrides[k];
+  }
+
+  // ---------- liczenie ----------
+  function allSessions(now) {
+    const list = state.sessions.slice();
+    if (state.current != null) list.push({ s: state.current, e: Math.max(now, state.current) });
+    return list;
+  }
+  // podsumowanie dni z przedziału [from, to] (Date, włącznie); sesje przez północ są dzielone
+  function summarize(from, to, now) {
+    from = startOfDay(from); to = startOfDay(to);
+    const map = new Map();
+    for (const x of allSessions(now)) {
+      let cur = x.s;
+      while (cur < x.e) {
+        const d = startOfDay(new Date(cur));
+        const next = addDays(d, 1).getTime();
+        const end = Math.min(x.e, next);
+        if (d >= from && d <= to) {
+          const k = dayKey(d);
+          const m = map.get(k) || { sec: 0, first: null, last: null };
+          m.sec += (end - cur) / 1000;
+          if (m.first == null || cur < m.first) m.first = cur;
+          if (m.last == null || end > m.last) m.last = end;
+          map.set(k, m);
+        }
+        cur = end;
+      }
+    }
+    const out = [];
+    for (let d = from; d <= to; d = addDays(d, 1)) {
+      const k = dayKey(d);
+      const m = map.get(k);
+      const ov = state.overrides[k];
+      const measured = m ? Math.round(m.sec / 60) : 0;
+      out.push({
+        key: k, date: d, sec: m ? m.sec : 0, measured,
+        first: ov && ov.from ? ov.from : (m ? hhmm(m.first) : null),
+        last: ov && ov.to ? ov.to : (m ? (m.last >= addDays(d, 1).getTime() ? "24:00" : hhmm(m.last)) : null),
+        override: ov ? ov.min : null,
+        minutes: ov ? ov.min : measured,
+      });
+    }
+    return out;
+  }
+  const sumMin = (from, to, now) => summarize(from, to, now).reduce((a, d) => a + d.minutes, 0);
+  const weekStart = (d) => addDays(startOfDay(d), -((d.getDay() + 6) % 7));
+  const monthStart = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+
+  // ---------- akcje ----------
+  function start() { state.current = Date.now(); state.paused = false; commit(); }
+  function closeCurrent(at) {
+    if (state.current == null) return;
+    const e = Math.max(at, state.current);
+    if (e - state.current >= 1000) state.sessions.push({ s: state.current, e });
+    state.current = null;
+  }
+  function pause() { closeCurrent(Date.now()); state.paused = true; commit(); }
+  function resume() { state.current = Date.now(); state.paused = false; commit(); }
+  function end() { closeCurrent(Date.now()); state.paused = false; commit(); }
+
+  // ---------- widok ----------
+  const ICONS = {
+    play: '<svg class="ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"/></svg>',
+    pause: '<svg class="ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4.5" width="4" height="15" rx="1"/><rect x="14" y="4.5" width="4" height="15" rx="1"/></svg>',
+    stop: '<svg class="ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5.5" y="5.5" width="13" height="13" rx="2"/></svg>',
+  };
+  let lastMode = null;
+  function renderActions() {
+    const mode = state.current != null ? "run" : state.paused ? "pause" : "idle";
+    if (mode === lastMode) return;
+    lastMode = mode;
+    const a = $("actions");
+    if (mode === "idle") a.innerHTML = `<button type="button" class="btn start full" data-act="start">${ICONS.play}Start pracy</button>`;
+    else if (mode === "run") a.innerHTML = `<button type="button" class="btn pause" data-act="pause">${ICONS.pause}Przerwa</button><button type="button" class="btn end" data-act="end">${ICONS.stop}Koniec pracy</button>`;
+    else a.innerHTML = `<button type="button" class="btn resume" data-act="resume">${ICONS.play}Wracam</button><button type="button" class="btn end" data-act="end">${ICONS.stop}Koniec pracy</button>`;
+  }
+
+  function tick() {
+    const now = Date.now();
+    const today = new Date(now);
+    const t = summarize(today, today, now)[0];
+    $("clock").textContent = hms(t.sec);
+    $("eyebrow").textContent = t.override != null ? `Dziś · korekta ${hm(t.override)}` : "Dziś przepracowano";
+    const pill = $("pill");
+    if (state.current != null) {
+      pill.textContent = "● LICZY"; pill.className = "pill go";
+      const startedToday = startOfDay(new Date(state.current)).getTime() === startOfDay(today).getTime();
+      const since = startedToday ? hhmm(state.current) : `${new Date(state.current).getDate()}.${pad(new Date(state.current).getMonth() + 1)} ${hhmm(state.current)}`;
+      $("sub").textContent = `Od ${since} · ten odcinek ${hms((now - state.current) / 1000)}` + (t.first && t.first !== since ? ` · start dnia ${t.first}` : "");
+    } else if (state.paused) {
+      pill.textContent = "PRZERWA"; pill.className = "pill pause";
+      $("sub").textContent = "Przerwa – czas stoi. Stuknij „Wracam”, gdy wrócisz.";
+    } else {
+      pill.textContent = "NIE LICZY"; pill.className = "pill";
+      $("sub").textContent = t.measured > 0 ? `Dzień zakończony o ${t.last}.` : "Stuknij „Start pracy”, gdy zaczynasz.";
+    }
+    // ostrzeżenie: licznik chodzi od wczoraj albo ponad 12 h
+    const running = state.current != null ? (now - state.current) / 3600000 : 0;
+    const fromYesterday = state.current != null && startOfDay(new Date(state.current)) < startOfDay(today);
+    const w = $("warn");
+    if (fromYesterday || running > 12) {
+      w.hidden = false;
+      $("warnText").innerHTML = `<b>Licznik działa od ${fromYesterday ? "wczoraj" : hhmm(state.current)}.</b> Zapomniałaś stuknąć „Koniec pracy”? Zakończ go i popraw godziny tamtego dnia.`;
+    } else w.hidden = true;
+    renderActions();
+    $("sYest").textContent = hm(summarize(addDays(today, -1), addDays(today, -1), now)[0].minutes);
+    $("sWeek").textContent = hm(sumMin(weekStart(today), today, now));
+    $("sMonth").textContent = hm(sumMin(monthStart(today), today, now));
+    // wiersz "Dziś" na liście
+    const row = document.querySelector('.day.today .dur');
+    if (row) row.innerHTML = hm(t.minutes) + (t.override != null ? "<em>korekta</em>" : "");
+    const rr = document.querySelector('.day.today .range');
+    if (rr) rr.textContent = rangeText(t, true);
+  }
+
+  function rangeText(d, isToday) {
+    if (!d.first) return d.override != null ? "wpisane ręcznie" : "–";
+    const to = isToday && state.current != null ? "teraz" : d.last;
+    return `${d.first} – ${to}`;
+  }
+
+  function relName(d, today) {
+    const diff = Math.round((startOfDay(today) - startOfDay(d)) / 86400000);
+    if (diff === 0) return "Dziś";
+    if (diff === 1) return "Wczoraj";
+    if (diff === 2) return "Przedwczoraj";
+    return cap(DAYS[d.getDay()]);
+  }
+
+  function renderDays() {
+    const now = Date.now(), today = new Date(now);
+    const from = new Date(today.getFullYear(), today.getMonth() - RETENTION_MONTHS, 1);
+    const list = summarize(from, today, now).filter(d => d.minutes > 0 || d.override != null || d.key === dayKey(today)).reverse();
+    const ul = $("days");
+    if (!list.some(d => d.minutes > 0 || d.override != null)) {
+      ul.innerHTML = `<li class="empty">Tu pojawi się każdy dzień pracy: od której do której i ile godzin. Zacznij od „Start pracy”.</li>`;
+      return;
+    }
+    ul.innerHTML = list.map(d => {
+      const isToday = d.key === dayKey(today);
+      const cls = ["day", isToday ? "today" : "", isWeekend(d.date) ? "weekend" : ""].join(" ");
+      return `<li><button type="button" class="${cls}" data-day="${d.key}">
+        <span class="when">${relName(d.date, today)}<small>${pad(d.date.getDate())}.${pad(d.date.getMonth() + 1)}.${d.date.getFullYear()}</small></span>
+        <span class="dur">${hm(d.minutes)}${d.override != null ? "<em>korekta</em>" : ""}</span>
+        <span class="range">${rangeText(d, isToday)}</span>
+      </button></li>`;
+    }).join("");
+  }
+
+  let monthsKey = "";
+  function renderMonths() {
+    const now = Date.now(), today = new Date(now);
+    const set = new Set([`${today.getFullYear()}-${pad(today.getMonth() + 1)}`]);
+    for (const x of allSessions(now)) { const d = new Date(x.s); set.add(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`); }
+    for (const k of Object.keys(state.overrides)) set.add(k.slice(0, 7));
+    const months = [...set].sort().reverse();
+    const key = months.join("|");
+    const sel = $("month");
+    const keep = sel.value;
+    const labels = months.map(m => {
+      const [y, mo] = m.split("-").map(Number);
+      const tot = sumMin(new Date(y, mo - 1, 1), new Date(y, mo, 0), now);
+      return `<option value="${m}">${cap(MONTHS[mo - 1])} ${y} · ${hm(tot)} h</option>`;
+    }).join("");
+    if (key !== monthsKey || true) {
+      sel.innerHTML = labels;
+      if (keep && months.includes(keep)) sel.value = keep;
+      else sel.value = months[today.getDate() <= 7 && months.length > 1 ? 1 : 0];
+      monthsKey = key;
+    }
+  }
+
+  function render() {
+    renderDays();
+    renderMonths();
+    if (document.activeElement !== $("name")) $("name").value = state.name;
+    tick();
+  }
+
+  // ---------- korekta ----------
+  function openFix(key) {
+    const today = new Date();
+    const fd = $("fixDate");
+    fd.max = dayKey(today);
+    fd.min = dayKey(new Date(today.getFullYear(), today.getMonth() - RETENTION_MONTHS, 1));
+    fd.value = key || dayKey(today);
+    fillFix();
+    $("sheetBg").hidden = false;
+    $("fixH").focus();
+  }
+  function fillFix() {
+    const k = $("fixDate").value;
+    if (!k) return;
+    const d = summarize(keyToDate(k), keyToDate(k), Date.now())[0];
+    $("fixMeasured").textContent = d.measured > 0 ? `${hm(d.measured)} (${d.first} – ${d.last})` : "brak pomiaru";
+    const ov = state.overrides[k];
+    $("fixFrom").value = ov && ov.from ? ov.from : (d.measured > 0 && d.first ? d.first : "");
+    $("fixTo").value = ov && ov.to ? ov.to : (d.measured > 0 && d.last && d.last !== "24:00" ? d.last : "");
+    $("fixH").value = Math.floor(d.minutes / 60);
+    $("fixM").value = d.minutes % 60;
+    $("fixRemove").hidden = !ov;
+    $("fixNote").textContent = "„Od” i „Do” policzą godziny same. Możesz też wpisać sam czas.";
+    $("fixNote").className = "note";
+  }
+  function fromToChanged() {
+    const f = $("fixFrom").value, t = $("fixTo").value;
+    if (!f || !t) return;
+    const [fh, fm] = f.split(":").map(Number), [th, tm] = t.split(":").map(Number);
+    let min = th * 60 + tm - (fh * 60 + fm);
+    if (min < 0) return;
+    $("fixH").value = Math.floor(min / 60);
+    $("fixM").value = min % 60;
+  }
+  function saveFix() {
+    const k = $("fixDate").value;
+    const h = parseInt($("fixH").value || "0", 10), m = parseInt($("fixM").value || "0", 10);
+    if (!k || isNaN(h) || isNaN(m) || h < 0 || m < 0 || m > 59 || h * 60 + m > 1440) {
+      $("fixNote").textContent = "Wpisz poprawny czas: godziny 0–24, minuty 0–59.";
+      $("fixNote").className = "note err";
+      return;
+    }
+    const entry = { min: h * 60 + m };
+    if ($("fixFrom").value) entry.from = $("fixFrom").value;
+    if ($("fixTo").value) entry.to = $("fixTo").value;
+    state.overrides[k] = entry;
+    closeFix();
+    commit();
+  }
+  function removeFix() { delete state.overrides[$("fixDate").value]; closeFix(); commit(); }
+  function closeFix() { $("sheetBg").hidden = true; }
+
+  // ---------- minimalny ZIP (bez kompresji) – xlsx to zwykły zip z plikami XML ----------
+  const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  const crc32 = (b) => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+  function makeZip(files) {
+    const enc = new TextEncoder(), parts = [], central = [];
+    let offset = 0;
+    for (const [name, text] of files) {
+      const nb = enc.encode(name), data = enc.encode(text), crc = crc32(data);
+      const h = new DataView(new ArrayBuffer(30));
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, 0, true);
+      h.setUint16(10, 0, true); h.setUint16(12, 0x21, true); h.setUint32(14, crc, true);
+      h.setUint32(18, data.length, true); h.setUint32(22, data.length, true); h.setUint16(26, nb.length, true); h.setUint16(28, 0, true);
+      parts.push(new Uint8Array(h.buffer), nb, data);
+      const c = new DataView(new ArrayBuffer(46));
+      c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint16(10, 0, true);
+      c.setUint16(12, 0, true); c.setUint16(14, 0x21, true); c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true);
+      c.setUint16(28, nb.length, true); c.setUint32(42, offset, true);
+      central.push(new Uint8Array(c.buffer), nb);
+      offset += 30 + nb.length + data.length;
+    }
+    const cdSize = central.reduce((a, b) => a + b.length, 0);
+    const e = new DataView(new ArrayBuffer(22));
+    e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true);
+    e.setUint32(12, cdSize, true); e.setUint32(16, offset, true);
+    return new Blob([...parts, ...central, new Uint8Array(e.buffer)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  }
+
+  // ---------- Excel ----------
+  const esc = (s) => String(s).replace(/[<>&"']/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" }[c]));
+  const serial = (d) => (Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(1899, 11, 30)) / 86400000;
+  const timeFrac = (t) => { if (t === "24:00") return 1; const [h, m] = t.split(":").map(Number); return (h * 60 + m) / 1440; };
+
+  async function buildXlsx(ym) {
+    const [y, mo] = ym.split("-").map(Number);
+    const days = summarize(new Date(y, mo - 1, 1), new Date(y, mo, 0), Date.now());
+    const name = state.name.trim();
+    const S = (r, t, s) => `<c r="${r}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${esc(t)}</t></is></c>`;
+    const N = (r, v, s) => `<c r="${r}" s="${s}"><v>${v}</v></c>`;
+    const E = (r, s) => `<c r="${r}" s="${s}"/>`;
+    const F = (r, f, v, s, str) => str ? `<c r="${r}" s="${s}" t="str"><f>${esc(f)}</f><v>${esc(v)}</v></c>` : `<c r="${r}" s="${s}"><f>${esc(f)}</f><v>${v}</v></c>`;
+    const row = (r, cells, ht) => `<row r="${r}"${ht ? ` ht="${ht}" customHeight="1"` : ""}>${cells.join("")}</row>`;
+    const H = 5, first = 6, last = first + days.length - 1, tot = last + 1;
+    const rows = [];
+    rows.push(row(1, [S("A1", "Ewidencja czasu pracy", 1)], 24));
+    rows.push(row(2, [S("A2", "Okres:", 2), S("B2", `${MONTHS[mo - 1]} ${y}`, 0)]));
+    if (name) rows.push(row(3, [S("A3", "Pracownik:", 2), S("B3", name, 0)]));
+    rows.push(row(H, ["Data", "Dzień tygodnia", "Rozpoczęcie", "Zakończenie", "Czas pracy", "Godziny", "Uwagi"].map((t, i) => S("ABCDEFG"[i] + H, t, 3)), 20));
+    let r = first, total = 0, work = 0;
+    for (const d of days) {
+      const w = isWeekend(d.date) ? 5 : 0;
+      const c = [N(`A${r}`, serial(d.date), 4 + w), S(`B${r}`, DAYS[d.date.getDay()], 5 + w)];
+      c.push(d.first ? N(`C${r}`, timeFrac(d.first), 6 + w) : E(`C${r}`, 6 + w));
+      c.push(d.last ? N(`D${r}`, timeFrac(d.last), 6 + w) : E(`D${r}`, 6 + w));
+      if (d.minutes > 0 || d.override != null) {
+        c.push(N(`E${r}`, d.minutes / 1440, 7 + w));
+        c.push(F(`F${r}`, `ROUND(E${r}*24,2)`, Math.round(d.minutes / 60 * 100) / 100, 8 + w));
+      } else { c.push(E(`E${r}`, 7 + w)); c.push(E(`F${r}`, 8 + w)); }
+      c.push(d.override != null ? S(`G${r}`, "korekta ręczna", 5 + w) : E(`G${r}`, 5 + w));
+      rows.push(row(r, c));
+      total += d.minutes; if (d.minutes > 0) work++;
+      r++;
+    }
+    rows.push(row(tot, [
+      S(`A${tot}`, "RAZEM", 14),
+      F(`B${tot}`, `"Dni pracy: "&COUNTIF(E${first}:E${last},">0")`, `Dni pracy: ${work}`, 17, true),
+      E(`C${tot}`, 17), E(`D${tot}`, 17),
+      F(`E${tot}`, `SUM(E${first}:E${last})`, total / 1440, 15),
+      F(`F${tot}`, `ROUND(E${tot}*24,2)`, Math.round(total / 60 * 100) / 100, 16),
+      E(`G${tot}`, 17),
+    ], 20));
+    const now = new Date();
+    rows.push(row(tot + 2, [S(`A${tot + 2}`, `Wygenerowano ${pad(now.getDate())}.${pad(now.getMonth() + 1)}.${now.getFullYear()} ${hhmm(now.getTime())} w aplikacji Czas pracy.`, 18)]));
+    const widths = [12.5, 15, 13, 13, 12.5, 11, 18];
+    const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:G${tot + 2}"/><sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="${H}" topLeftCell="A${first}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join("")}</cols><sheetData>${rows.join("")}</sheetData><mergeCells count="1"><mergeCell ref="A1:G1"/></mergeCells><pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="portrait" fitToHeight="1" fitToWidth="1"/></worksheet>`;
+    const xf = (n, f, fi, b, al) => `<xf numFmtId="${n}" fontId="${f}" fillId="${fi}" borderId="${b}" xfId="0"${n ? ' applyNumberFormat="1"' : ""}${f ? ' applyFont="1"' : ""}${fi ? ' applyFill="1"' : ""}${b ? ' applyBorder="1"' : ""}${al ? ` applyAlignment="1"><alignment horizontal="${al}" vertical="center"/></xf>` : "/>"}`;
+    const xfs = [xf(0,0,0,0), xf(0,2,0,0), xf(0,1,0,0), xf(0,3,2,1,"center"), xf(164,0,0,1,"center"), xf(0,0,0,1), xf(165,0,0,1,"center"), xf(166,0,0,1,"center"), xf(167,0,0,1,"center"),
+      xf(164,4,3,1,"center"), xf(0,4,3,1), xf(165,4,3,1,"center"), xf(166,4,3,1,"center"), xf(167,4,3,1,"center"), xf(0,1,4,1), xf(166,1,4,1,"center"), xf(167,1,4,1,"center"), xf(0,1,4,1), xf(0,4,0,0)];
+    const font = (b, sz, col) => `<font>${b ? "<b/>" : ""}<sz val="${sz}"/>${col ? `<color rgb="${col}"/>` : '<color theme="1"/>'}<name val="Calibri"/><family val="2"/></font>`;
+    const fill = (c) => `<fill><patternFill patternType="solid"><fgColor rgb="${c}"/><bgColor indexed="64"/></patternFill></fill>`;
+    const bc = '<color rgb="FFD0D7DE"/>';
+    const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="4"><numFmt numFmtId="164" formatCode="dd\\.mm\\.yyyy"/><numFmt numFmtId="165" formatCode="hh:mm"/><numFmt numFmtId="166" formatCode="[h]:mm"/><numFmt numFmtId="167" formatCode="0.00"/></numFmts><fonts count="5">${font(0,11)}${font(1,11)}${font(1,16,"FF1F3A5F")}${font(1,11,"FFFFFFFF")}${font(0,10,"FF7F7F7F")}</fonts><fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>${fill("FF1F3A5F")}${fill("FFF2F2F2")}${fill("FFDDEBF7")}</fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin">${bc}</left><right style="thin">${bc}</right><top style="thin">${bc}</top><bottom style="thin">${bc}</bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${xfs.length}">${xfs.join("")}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+    return makeZip([
+      ["[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'],
+      ["_rels/.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
+      ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${ym}" sheetId="1" r:id="rId1"/></sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>`],
+      ["xl/_rels/workbook.xml.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'],
+      ["xl/styles.xml", styles],
+      ["xl/worksheets/sheet1.xml", sheet]
+    ]);
+  }
+
+  function note(text, kind) { const n = $("exportNote"); n.textContent = text; n.className = "note" + (kind ? " " + kind : ""); }
+
+  async function shareOrSave(blob, filename, noteFn) {
+    const file = new File([blob], filename, { type: blob.type });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: filename }); noteFn("Gotowe.", "ok"); return; }
+      catch (e) { if (e && e.name === "AbortError") { noteFn("Anulowano."); return; } }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    noteFn("Plik zapisany w Pobranych.", "ok");
+  }
+
+  async function exportXlsx() {
+    const ym = $("month").value;
+    try {
+      const blob = await buildXlsx(ym);
+      const nm = state.name.trim();
+      const filename = `Czas pracy ${ym}${nm ? " " + nm : ""}.xlsx`.replace(/[\\/:*?"<>|]/g, "_");
+      await shareOrSave(blob, filename, note);
+    } catch (e) { note("Nie udało się przygotować pliku. Użyj „Kopiuj tabelę”.", "err"); }
+  }
+
+  function bnote(text, kind) { const n = $("backupNote"); n.textContent = text; n.className = "note" + (kind ? " " + kind : ""); }
+  async function backup() {
+    const d = new Date();
+    const blob = new Blob([JSON.stringify(state, null, 1)], { type: "application/json" });
+    await shareOrSave(blob, `czas-pracy-kopia-${dayKey(d)}.json`, bnote);
+  }
+  function restore(file) {
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const s = normalize(JSON.parse(r.result));
+        if (!s.sessions.length && !Object.keys(s.overrides).length && s.current == null) throw new Error("empty");
+        state = s; lastMode = null; commit();
+        bnote(`Wczytano kopię: ${s.sessions.length} odcinków pracy.`, "ok");
+      } catch (e) { bnote("To nie jest plik kopii z tej aplikacji.", "err"); }
+    };
+    r.readAsText(file);
+  }
+
+  function tableText(ym) {
+    const [y, mo] = ym.split("-").map(Number);
+    const days = summarize(new Date(y, mo - 1, 1), new Date(y, mo, 0), Date.now());
+    const lines = ["Data\tDzień tygodnia\tRozpoczęcie\tZakończenie\tCzas pracy\tGodziny\tUwagi"];
+    let total = 0;
+    for (const d of days) {
+      const has = d.minutes > 0 || d.override != null;
+      total += d.minutes;
+      lines.push([`${pad(d.date.getDate())}.${pad(d.date.getMonth() + 1)}.${d.date.getFullYear()}`, DAYS[d.date.getDay()], d.first || "", d.last || "",
+        has ? hm(d.minutes) : "", has ? (d.minutes / 60).toFixed(2).replace(".", ",") : "", d.override != null ? "korekta ręczna" : ""].join("\t"));
+    }
+    lines.push(["RAZEM", "", "", "", hm(total), (total / 60).toFixed(2).replace(".", ","), ""].join("\t"));
+    return lines.join("\n");
+  }
+  function copyTable() {
+    const text = tableText($("month").value);
+    const ok = () => note("Skopiowano. Wklej w Excelu, Numbers albo w treści maila.", "ok");
+    try {
+      navigator.clipboard.writeText(text).then(ok, () => fallbackCopy(text, ok));
+    } catch (e) { fallbackCopy(text, ok); }
+  }
+  function fallbackCopy(text, ok) {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    let done = false; try { done = document.execCommand("copy"); } catch (e) {}
+    ta.remove();
+    if (done) ok(); else note("Nie udało się skopiować. Spróbuj „Pobierz Excel”.", "err");
+  }
+
+  // ---------- nie wygaszaj ekranu ----------
+  let wakeLock = null;
+  async function applyWake() {
+    const want = $("wakeToggle").checked;
+    try { localStorage.setItem(LS_KEY + "-wake", want ? "1" : "0"); } catch (e) {}
+    if (want && document.visibilityState === "visible" && "wakeLock" in navigator) {
+      try { if (!wakeLock) { wakeLock = await navigator.wakeLock.request("screen"); wakeLock.addEventListener("release", () => { wakeLock = null; }); } }
+      catch (e) { wakeLock = null; }
+    } else if (!want && wakeLock) { try { await wakeLock.release(); } catch (e) {} wakeLock = null; }
+  }
+
+  // ---------- zdarzenia ----------
+  $("actions").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-act]"); if (!b) return;
+    ({ start, pause, resume, end })[b.dataset.act]();
+  });
+  $("days").addEventListener("click", (e) => { const b = e.target.closest("[data-day]"); if (b) openFix(b.dataset.day); });
+  $("addDay").addEventListener("click", () => openFix(null));
+  $("warnEnd").addEventListener("click", end);
+  $("warnFix").addEventListener("click", () => { const k = state.current != null ? dayKey(new Date(state.current)) : null; end(); openFix(k); });
+  $("fixDate").addEventListener("change", fillFix);
+  $("fixFrom").addEventListener("change", fromToChanged);
+  $("fixTo").addEventListener("change", fromToChanged);
+  $("fixSave").addEventListener("click", saveFix);
+  $("fixCancel").addEventListener("click", closeFix);
+  $("fixRemove").addEventListener("click", removeFix);
+  $("sheetBg").addEventListener("click", (e) => { if (e.target === $("sheetBg")) closeFix(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("sheetBg").hidden) closeFix(); });
+  $("xlsx").addEventListener("click", exportXlsx);
+  $("copy").addEventListener("click", copyTable);
+  $("backup").addEventListener("click", backup);
+  $("restoreBtn").addEventListener("click", () => $("restore").click());
+  $("restore").addEventListener("change", (e) => { const f = e.target.files[0]; if (f) restore(f); e.target.value = ""; });
+  let nameTimer = null;
+  $("name").addEventListener("input", () => { clearTimeout(nameTimer); nameTimer = setTimeout(() => { state.name = $("name").value; commit(); }, 800); });
+  $("wakeToggle").addEventListener("change", applyWake);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { render(); applyWake(); } });
+
+  // ---------- start ----------
+  const local = loadLocal();
+  if (local) state = normalize(local);
+  try { $("wakeToggle").checked = localStorage.getItem(LS_KEY + "-wake") === "1"; } catch (e) {}
+  render();
+  setInterval(tick, 1000);
+  let lastDay = dayKey(new Date());
+  setInterval(() => { const k = dayKey(new Date()); if (k !== lastDay) { lastDay = k; render(); } }, 30000);
+  applyWake();
+  const standalone = window.navigator.standalone === true || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+  $("installInfo").hidden = standalone;
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+})();
+</script>
+</body>
+</html>
