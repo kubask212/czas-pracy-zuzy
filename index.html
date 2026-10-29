@@ -715,7 +715,8 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
       const g = await gh("GET");
       if (g.status === 200) sha = (await g.json()).sha;
       else if (g.status !== 404) throw g;
-      const body = { message: `Godziny – ${dayKey(new Date())} ${hhmm(Date.now())}`, content: b64enc(JSON.stringify(dataOnly(), null, 1)) };
+      const body = { message: `Godziny – ${dayKey(new Date())} ${hhmm(Date.now())}`, content: b64enc(JSON.stringify(dataOnly(), null, 1)),
+        committer: { name: "Kuba", email: "kubask212@users.noreply.github.com" }, author: { name: "Kuba", email: "kubask212@users.noreply.github.com" } };
       if (sha) body.sha = sha;
       const r = await gh("PUT", body);
       if (!r.ok) throw r;
