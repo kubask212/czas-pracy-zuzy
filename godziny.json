@@ -25,11 +25,11 @@
  "paused": false,
  "overrides": {
   "2026-10-29": {
-   "min": 420,
+   "min": 470,
    "from": "08:15",
    "to": "16:05"
   }
  },
  "name": "",
- "updatedAt": 1793286504515
+ "updatedAt": 1793286533068
 }
