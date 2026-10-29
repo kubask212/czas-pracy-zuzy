@@ -1,5 +1,5 @@
 // Pozwala otworzyć aplikację bez internetu. Najpierw sieć (żeby łapać aktualizacje), w razie braku – kopia.
-const CACHE = "czas-pracy-v1";
+const CACHE = "czas-pracy-v2";
 const FILES = ["./", "index.html", "manifest.webmanifest", "icon-180.png", "icon-192.png", "icon-512.png"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener("activate", (e) => { e.waitUntil(self.clients.claim()); });

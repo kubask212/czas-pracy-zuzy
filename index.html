@@ -165,6 +165,13 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
     </div>
   </div>
 
+  <div class="warn" id="backupWarn" hidden>
+    <div><b>Zrób kopię zapasową.</b> <span id="backupWarnText"></span> Wyślij ją sobie mailem albo zapisz w Plikach – chroni godziny przy zmianie telefonu lub usunięciu apki.</div>
+    <div class="warn-row">
+      <button type="button" id="backupNow">Zrób kopię teraz</button>
+    </div>
+  </div>
+
   <div class="actions" id="actions"></div>
 
   <label class="wake" for="wakeToggle">
@@ -249,7 +256,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
   // paused: przerwa w trakcie dnia; overrides: ręczne korekty {"2026-10-29": {min, from, to}}
   const LS_KEY = "czas-pracy-v1";
   const RETENTION_MONTHS = 3;
-  let state = { sessions: [], current: null, paused: false, overrides: {}, name: "", updatedAt: 0 };
+  let state = { sessions: [], current: null, paused: false, overrides: {}, name: "", lastBackup: 0, updatedAt: 0 };
 
   const $ = (id) => document.getElementById(id);
   const pad = (n) => String(n).padStart(2, "0");
@@ -281,6 +288,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
       paused: !!(s && s.paused),
       overrides: (s && typeof s.overrides === "object" && s.overrides) || {},
       name: (s && typeof s.name === "string") ? s.name : "",
+      lastBackup: (s && typeof s.lastBackup === "number") ? s.lastBackup : 0,
       updatedAt: (s && s.updatedAt) || 0,
     };
   }
@@ -400,6 +408,12 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
       w.hidden = false;
       $("warnText").innerHTML = `<b>Licznik działa od ${fromYesterday ? "wczoraj" : hhmm(state.current)}.</b> Zapomniałaś stuknąć „Koniec pracy”? Zakończ go i popraw godziny tamtego dnia.`;
     } else w.hidden = true;
+    // przypomnienie o kopii: są godziny z co najmniej 2 różnych dni i ostatnia kopia > 7 dni temu
+    const workedDays = new Set(state.sessions.map(x => dayKey(new Date(x.s)))).size;
+    const backupAge = state.lastBackup ? Math.floor((now - state.lastBackup) / 86400000) : null;
+    const needBackup = workedDays >= 2 && (backupAge == null || backupAge >= 7);
+    $("backupWarn").hidden = !needBackup;
+    if (needBackup) $("backupWarnText").textContent = backupAge == null ? "Nie było jeszcze żadnej kopii." : `Ostatnia kopia ${backupAge} dni temu.`;
     renderActions();
     $("sYest").textContent = hm(summarize(addDays(today, -1), addDays(today, -1), now)[0].minutes);
     $("sWeek").textContent = hm(sumMin(weekStart(today), today, now));
@@ -623,14 +637,15 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
   async function shareOrSave(blob, filename, noteFn) {
     const file = new File([blob], filename, { type: blob.type });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: filename }); noteFn("Gotowe.", "ok"); return; }
-      catch (e) { if (e && e.name === "AbortError") { noteFn("Anulowano."); return; } }
+      try { await navigator.share({ files: [file], title: filename }); noteFn("Gotowe.", "ok"); return true; }
+      catch (e) { if (e && e.name === "AbortError") { noteFn("Anulowano."); return false; } }
     }
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
     noteFn("Plik zapisany w Pobranych.", "ok");
+    return true;
   }
 
   async function exportXlsx() {
@@ -647,7 +662,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
   async function backup() {
     const d = new Date();
     const blob = new Blob([JSON.stringify(state, null, 1)], { type: "application/json" });
-    await shareOrSave(blob, `czas-pracy-kopia-${dayKey(d)}.json`, bnote);
+    if (await shareOrSave(blob, `czas-pracy-kopia-${dayKey(d)}.json`, bnote)) { state.lastBackup = Date.now(); commit(); }
   }
   function restore(file) {
     const r = new FileReader();
@@ -723,6 +738,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
   $("xlsx").addEventListener("click", exportXlsx);
   $("copy").addEventListener("click", copyTable);
   $("backup").addEventListener("click", backup);
+  $("backupNow").addEventListener("click", backup);
   $("restoreBtn").addEventListener("click", () => $("restore").click());
   $("restore").addEventListener("change", (e) => { const f = e.target.files[0]; if (f) restore(f); e.target.value = ""; });
   let nameTimer = null;
