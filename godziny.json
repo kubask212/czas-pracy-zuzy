@@ -135,12 +135,12 @@
  "name": "Zuzanna Wojdyła ",
  "sent": {
   "2026-11": {
-   "at": 1794861923567,
+   "at": 1794862105180,
    "forecastFrom": 16,
    "main": {
     "kind": "main",
     "ym": "2026-11",
-    "at": 1794861923567,
+    "at": 1794862105180,
     "name": "Zuzanna Wojdyła",
     "rows": [
      {
@@ -328,7 +328,7 @@
    "corr": {
     "kind": "corr",
     "ym": "2026-10",
-    "at": 1794861923567,
+    "at": 1794862105180,
     "name": "Zuzanna Wojdyła",
     "rows": [
      {
@@ -405,7 +405,7 @@
      },
      {
       "d": "2026-10-28",
-      "min": null,
+      "min": 495,
       "x": false,
       "f": false
      },
@@ -431,5 +431,5 @@
    }
   }
  },
- "updatedAt": 1794862103147
+ "updatedAt": 1794862109365
 }
