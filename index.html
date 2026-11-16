@@ -123,6 +123,14 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
 .day.today .when { color: var(--go); }
 .day.weekend .when { color: var(--muted); }
 .empty { padding: 22px 16px; color: var(--muted); text-align: center; }
+.more { background: none; color: var(--navy); font-weight: 600; font-size: 15px; padding: 10px 4px; text-align: center; width: 100%; }
+.archive { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.archive li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.archive li:last-child { border-bottom: 0; }
+.archive b { display: block; font-weight: 600; }
+.archive small { color: var(--muted); font-size: 13px; }
+.archive button { background: var(--go-soft); color: var(--navy); font-weight: 600; font-size: 14px; border-radius: 10px; padding: 8px 12px; flex: none; }
+.archive .empty { padding: 12px 0; text-align: left; }
 .hint { color: var(--muted); font-size: 14px; margin: 0 4px; }
 
 .export { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
@@ -180,24 +188,21 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
 
   <h2>Ostatnie dni</h2>
   <div class="panel"><ul class="days" id="days"></ul></div>
+  <button type="button" class="more" id="moreDays" hidden>Pokaż starsze dni</button>
   <p class="hint">Stuknij dzień, żeby poprawić godziny albo dopisać pracę bez telefonu.</p>
   <button type="button" class="btn ghost" id="addDay">Dodaj lub popraw inny dzień</button>
 
-  <h2>Rozliczenie miesiąca</h2>
+  <h2>Rozliczenie</h2>
   <div class="panel export">
+    <p class="hint" style="margin:0" id="sendInfo"></p>
+    <button type="button" class="btn excel" id="send">Wyślij rozliczenie</button>
+    <div class="note" id="exportNote"></div>
     <div class="field">
-      <label for="month">Miesiąc</label>
-      <select id="month"></select>
-    </div>
-    <div class="field">
-      <label for="name">Imię i nazwisko (pojawi się w pliku)</label>
+      <label for="name">Imię i nazwisko (pojawi się w plikach)</label>
       <input id="name" type="text" autocomplete="name" placeholder="np. Zuzanna Kowalska">
     </div>
-    <div class="row2">
-      <button type="button" class="btn excel" id="xlsx">Wyślij Excel</button>
-      <button type="button" class="btn ghost" id="copy">Kopiuj tabelę</button>
-    </div>
-    <div class="note" id="exportNote"></div>
+    <button type="button" class="more" id="archiveToggle" aria-expanded="false" aria-controls="archive">Wcześniejsze rozliczenia</button>
+    <ul class="archive" id="archive" hidden></ul>
   </div>
 
   <h2>Zapis na GitHubie</h2>
@@ -258,13 +263,19 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
   // sessions: zamknięte odcinki pracy [{s, e}] (ms); current: start bieżącego odcinka albo null;
   // paused: przerwa w trakcie dnia; overrides: ręczne korekty {"2026-10-29": {min, from, to}}
   const LS_KEY = "czas-pracy-v1";
-  const RETENTION_MONTHS = 3;
-  let state = { sessions: [], current: null, paused: false, overrides: {}, name: "", updatedAt: 0 };
+  const KEEP_MONTHS = 12;      // godziny w telefonie i w godziny.json: rok wstecz
+  const SHOW_MONTHS = 2;       // apka pokazuje bieżący miesiąc + 2 poprzednie
+  const SEND_FROM_DAY = 14;    // rozliczenie można wysłać od 14-go do końca miesiąca
+  const FORECAST_DEFAULT = 420; // 7:00 (8:00–15:00), gdy nie ma jeszcze historii
+  const DAYS_ON_LIST = 6;
+  // sent: wysłane rozliczenia {"2026-11": {at, forecastFrom, main, corr}} – dokładne kopie plików
+  let state = { sessions: [], current: null, paused: false, overrides: {}, name: "", sent: {}, updatedAt: 0 };
 
   const $ = (id) => document.getElementById(id);
   const pad = (n) => String(n).padStart(2, "0");
   const DAYS = ["niedziela", "poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota"];
   const MONTHS = ["styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec", "lipiec", "sierpień", "wrzesień", "październik", "listopad", "grudzień"];
+  const MONTHS_GEN = ["stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia", "września", "października", "listopada", "grudnia"];
 
   const dayKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   const keyToDate = (k) => { const [y, m, d] = k.split("-").map(Number); return new Date(y, m - 1, d); };
@@ -275,6 +286,28 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
   const hhmm = (ms) => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
   const isWeekend = (d) => d.getDay() === 0 || d.getDay() === 6;
   const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  const ymOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+  const ymDate = (ym) => { const [y, m] = ym.split("-").map(Number); return new Date(y, m - 1, 1); };
+  const ddmm = (d) => `${pad(d.getDate())}.${pad(d.getMonth() + 1)}`;
+  const showFrom = (today) => new Date(today.getFullYear(), today.getMonth() - SHOW_MONTHS, 1);
+
+  // ---------- święta w Polsce ----------
+  function easter(y) {
+    const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+    const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4;
+    const l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+    return new Date(y, Math.floor((h + l - 7 * m + 114) / 31) - 1, ((h + l - 7 * m + 114) % 31) + 1);
+  }
+  const holidayCache = {};
+  function holidays(y) {
+    if (holidayCache[y]) return holidayCache[y];
+    const set = new Set(["01-01", "01-06", "05-01", "05-03", "08-15", "11-01", "11-11", "12-25", "12-26"].map(x => `${y}-${x}`));
+    if (y >= 2025) set.add(`${y}-12-24`); // Wigilia – wolna od 2025
+    const e = easter(y);
+    for (const n of [0, 1, 49, 60]) set.add(dayKey(addDays(e, n))); // Wielkanoc, poniedziałek, Zielone Świątki, Boże Ciało
+    return (holidayCache[y] = set);
+  }
+  const isHoliday = (d) => holidays(d.getFullYear()).has(dayKey(d));
 
   // ---------- zapis ----------
   function loadLocal() {
@@ -291,6 +324,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
       paused: !!(s && s.paused),
       overrides: (s && typeof s.overrides === "object" && s.overrides) || {},
       name: (s && typeof s.name === "string") ? s.name : "",
+      sent: (s && typeof s.sent === "object" && s.sent && !Array.isArray(s.sent)) ? s.sent : {},
       updatedAt: (s && s.updatedAt) || 0,
     };
   }
@@ -302,9 +336,11 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
   }
   function prune() {
     const now = new Date();
-    const cutoff = new Date(now.getFullYear(), now.getMonth() - RETENTION_MONTHS, 1).getTime();
+    const cutoff = new Date(now.getFullYear(), now.getMonth() - KEEP_MONTHS, 1).getTime();
     state.sessions = state.sessions.filter(x => x.e >= cutoff);
     for (const k of Object.keys(state.overrides)) if (keyToDate(k).getTime() < cutoff) delete state.overrides[k];
+    const sentCutoff = ymOf(showFrom(now));
+    for (const k of Object.keys(state.sent)) if (k < sentCutoff) delete state.sent[k];
   }
 
   // ---------- liczenie ----------
@@ -437,13 +473,17 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
 
   function renderDays() {
     const now = Date.now(), today = new Date(now);
-    const from = new Date(today.getFullYear(), today.getMonth() - RETENTION_MONTHS, 1);
-    const list = summarize(from, today, now).filter(d => d.minutes > 0 || d.override != null || d.key === dayKey(today)).reverse();
-    const ul = $("days");
-    if (!list.some(d => d.minutes > 0 || d.override != null)) {
+    const all = summarize(showFrom(today), today, now).filter(d => d.minutes > 0 || d.override != null || d.key === dayKey(today)).reverse();
+    const ul = $("days"), more = $("moreDays");
+    if (!all.some(d => d.minutes > 0 || d.override != null)) {
       ul.innerHTML = `<li class="empty">Tu pojawi się każdy dzień pracy: od której do której i ile godzin. Zacznij od „Start pracy”.</li>`;
+      more.hidden = true;
       return;
     }
+    const hiddenCount = all.length - DAYS_ON_LIST;
+    more.hidden = hiddenCount <= 0;
+    more.textContent = showAllDays ? "Zwiń listę" : `Pokaż starsze dni (${hiddenCount})`;
+    const list = showAllDays ? all : all.slice(0, DAYS_ON_LIST);
     ul.innerHTML = list.map(d => {
       const isToday = d.key === dayKey(today);
       const cls = ["day", isToday ? "today" : "", isWeekend(d.date) ? "weekend" : ""].join(" ");
@@ -455,32 +495,11 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
     }).join("");
   }
 
-  let monthsKey = "";
-  function renderMonths() {
-    const now = Date.now(), today = new Date(now);
-    const set = new Set([`${today.getFullYear()}-${pad(today.getMonth() + 1)}`]);
-    for (const x of allSessions(now)) { const d = new Date(x.s); set.add(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`); }
-    for (const k of Object.keys(state.overrides)) set.add(k.slice(0, 7));
-    const months = [...set].sort().reverse();
-    const key = months.join("|");
-    const sel = $("month");
-    const keep = sel.value;
-    const labels = months.map(m => {
-      const [y, mo] = m.split("-").map(Number);
-      const tot = sumMin(new Date(y, mo - 1, 1), new Date(y, mo, 0), now);
-      return `<option value="${m}">${cap(MONTHS[mo - 1])} ${y} · ${hm(tot)} h</option>`;
-    }).join("");
-    if (key !== monthsKey || true) {
-      sel.innerHTML = labels;
-      if (keep && months.includes(keep)) sel.value = keep;
-      else sel.value = months[today.getDate() <= 7 && months.length > 1 ? 1 : 0];
-      monthsKey = key;
-    }
-  }
+  let showAllDays = false;
 
   function render() {
     renderDays();
-    renderMonths();
+    renderSend();
     if (document.activeElement !== $("name")) $("name").value = state.name;
     renderSync();
     tick();
@@ -491,7 +510,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
     const today = new Date();
     const fd = $("fixDate");
     fd.max = dayKey(today);
-    fd.min = dayKey(new Date(today.getFullYear(), today.getMonth() - RETENTION_MONTHS, 1));
+    fd.min = dayKey(showFrom(today));
     fd.value = key || dayKey(today);
     fillFix();
     $("sheetBg").hidden = false;
@@ -566,95 +585,186 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
     return new Blob([...parts, ...central, new Uint8Array(e.buffer)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   }
 
-  // ---------- Excel ----------
+  // ---------- rozliczenie: dane do plików ----------
+  // Wiersz pliku: { d: "2026-11-03", min: minuty (zaokrąglone do 15) albo null, x: święto, f: prognoza }
+  const q15 = (min) => Math.round(min / 15) * 15;
+
+  // Prognoza: średnia z ostatnich 8 tygodni dla danego dnia tygodnia, zaokrąglona do pełnej godziny.
+  function forecastFn(today) {
+    const sum = [0, 0, 0, 0, 0, 0, 0], cnt = [0, 0, 0, 0, 0, 0, 0];
+    for (const d of summarize(addDays(today, -56), addDays(today, -1), Date.now())) {
+      if (d.minutes > 0 && !isHoliday(d.date)) { sum[d.date.getDay()] += d.minutes; cnt[d.date.getDay()]++; }
+    }
+    return (dow) => cnt[dow] ? Math.round(sum[dow] / cnt[dow] / 60) * 60 : FORECAST_DEFAULT;
+  }
+  function actualRow(d) {
+    const has = d.minutes > 0 || d.override != null;
+    if (!has && isHoliday(d.date)) return { d: d.key, min: null, x: true, f: false };
+    return { d: d.key, min: has ? q15(d.minutes) : null, x: false, f: false };
+  }
+  function mainRows(ym, today) {
+    const m = ymDate(ym), fc = forecastFn(today);
+    return summarize(m, new Date(m.getFullYear(), m.getMonth() + 1, 0), Date.now()).map(d => {
+      if (d.date < today) return actualRow(d);
+      if (isWeekend(d.date)) return { d: d.key, min: null, x: false, f: false };
+      if (isHoliday(d.date)) return { d: d.key, min: null, x: true, f: true };
+      return { d: d.key, min: fc(d.date.getDay()), x: false, f: true };
+    });
+  }
+  function corrRows(ym, fromDay) {
+    const m = ymDate(ym);
+    return summarize(new Date(m.getFullYear(), m.getMonth(), fromDay), new Date(m.getFullYear(), m.getMonth() + 1, 0), Date.now()).map(actualRow);
+  }
+  function fileName(snap) {
+    const m = ymDate(snap.ym), what = snap.kind === "corr" ? "korekta" : "czas pracy";
+    const base = `${what} ${MONTHS[m.getMonth()]} ${m.getFullYear()}`;
+    return ((snap.name ? `${snap.name} – ` : "") + (snap.name ? base : cap(base)) + ".xlsx").replace(/[\\/:*?"<>|]/g, "_");
+  }
+
+  // ---------- Excel (3 kolumny: Data, Dzień tygodnia, Czas pracy) ----------
   const esc = (s) => String(s).replace(/[<>&"']/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" }[c]));
   const serial = (d) => (Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(1899, 11, 30)) / 86400000;
-  // „Godziny” dla HR: zaokrąglenie do najbliższego kwadransa (7:51 → 7,75; 7:53 → 8,00)
-  const quarterHours = (min) => Math.round(min / 15) / 4;
-  const timeFrac = (t) => { if (t === "24:00") return 1; const [h, m] = t.split(":").map(Number); return (h * 60 + m) / 1440; };
 
-  async function buildXlsx(ym) {
-    const [y, mo] = ym.split("-").map(Number);
-    const days = summarize(new Date(y, mo - 1, 1), new Date(y, mo, 0), Date.now());
-    const name = state.name.trim();
+  function buildXlsx(snap) {
+    const m = ymDate(snap.ym);
+    const isCorr = snap.kind === "corr";
     const S = (r, t, s) => `<c r="${r}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${esc(t)}</t></is></c>`;
     const N = (r, v, s) => `<c r="${r}" s="${s}"><v>${v}</v></c>`;
     const E = (r, s) => `<c r="${r}" s="${s}"/>`;
-    const F = (r, f, v, s, str) => str ? `<c r="${r}" s="${s}" t="str"><f>${esc(f)}</f><v>${esc(v)}</v></c>` : `<c r="${r}" s="${s}"><f>${esc(f)}</f><v>${v}</v></c>`;
     const row = (r, cells, ht) => `<row r="${r}"${ht ? ` ht="${ht}" customHeight="1"` : ""}>${cells.join("")}</row>`;
-    const H = 5, first = 6, last = first + days.length - 1, tot = last + 1;
-    const rows = [];
-    rows.push(row(1, [S("A1", "Ewidencja czasu pracy", 1)], 24));
-    rows.push(row(2, [S("A2", "Okres:", 2), S("B2", `${MONTHS[mo - 1]} ${y}`, 0)]));
-    if (name) rows.push(row(3, [S("A3", "Pracownik:", 2), S("B3", name, 0)]));
-    rows.push(row(H, ["Data", "Dzień tygodnia", "Rozpoczęcie", "Zakończenie", "Czas pracy", "Godziny"].map((t, i) => S("ABCDEF"[i] + H, t, 3)), 20));
-    let r = first, total = 0, work = 0, totalRounded = 0;
-    for (const d of days) {
-      const w = isWeekend(d.date) ? 5 : 0;
-      const c = [N(`A${r}`, serial(d.date), 4 + w), S(`B${r}`, DAYS[d.date.getDay()], 5 + w)];
-      c.push(d.first ? N(`C${r}`, timeFrac(d.first), 6 + w) : E(`C${r}`, 6 + w));
-      c.push(d.last ? N(`D${r}`, timeFrac(d.last), 6 + w) : E(`D${r}`, 6 + w));
-      if (d.minutes > 0 || d.override != null) {
-        c.push(N(`E${r}`, d.minutes / 1440, 7 + w));
-        c.push(F(`F${r}`, `ROUND(E${r}*24*4,0)/4`, quarterHours(d.minutes), 8 + w));
-      } else { c.push(E(`E${r}`, 7 + w)); c.push(E(`F${r}`, 8 + w)); }
-      rows.push(row(r, c));
-      total += d.minutes; if (d.minutes > 0) work++;
-      if (d.minutes > 0 || d.override != null) totalRounded += quarterHours(d.minutes);
+    const rows = snap.rows;
+    const first = rows.length ? keyToDate(rows[0].d) : m, last = rows.length ? keyToDate(rows[rows.length - 1].d) : m;
+    const out = [];
+    out.push(row(1, [S("A1", isCorr ? "Korekta czasu pracy" : "Ewidencja czasu pracy", 1)], 24));
+    out.push(row(2, [S("A2", "Okres:", 2), S("B2", `${MONTHS[m.getMonth()]} ${m.getFullYear()}` + (isCorr ? ` (${ddmm(first)}–${ddmm(last)})` : ""), 0)]));
+    if (snap.name) out.push(row(3, [S("A3", "Pracownik:", 2), S("B3", snap.name, 0)]));
+    const fRow = rows.find(x => x.f);
+    if (fRow) out.push(row(4, [S("A4", "prognoza", 20), S("B4", `od ${ddmm(keyToDate(fRow.d))} – prognozowany czas pracy`, 19)]));
+    const H = 6, top = H + 1, bottom = top + rows.length - 1, tot = bottom + 1;
+    out.push(row(H, ["Data", "Dzień tygodnia", "Czas pracy"].map((t, i) => S("ABC"[i] + H, t, 3)), 20));
+    let r = top, total = 0;
+    for (const x of rows) {
+      const d = keyToDate(x.d);
+      const st = x.f ? 12 : isWeekend(d) ? 8 : 4; // 4 zwykły, 8 weekend, 12 prognoza
+      const c = [N(`A${r}`, serial(d), st), S(`B${r}`, DAYS[d.getDay()], st + 1)];
+      if (x.x) c.push(S(`C${r}`, "X", st + 3));
+      else if (x.min != null) { c.push(N(`C${r}`, x.min / 1440, st + 2)); total += x.min; }
+      else c.push(E(`C${r}`, st + 2));
+      out.push(row(r, c));
       r++;
     }
-    rows.push(row(tot, [
-      S(`A${tot}`, "RAZEM", 14),
-      F(`B${tot}`, `"Dni pracy: "&COUNTIF(E${first}:E${last},">0")`, `Dni pracy: ${work}`, 17, true),
-      E(`C${tot}`, 17), E(`D${tot}`, 17),
-      F(`E${tot}`, `SUM(E${first}:E${last})`, total / 1440, 15),
-      F(`F${tot}`, `SUM(F${first}:F${last})`, totalRounded, 16),
-    ], 20));
-    const now = new Date();
-    rows.push(row(tot + 2, [S(`A${tot + 2}`, `Wygenerowano ${pad(now.getDate())}.${pad(now.getMonth() + 1)}.${now.getFullYear()} ${hhmm(now.getTime())} w aplikacji Czas pracy.`, 18)]));
-    const widths = [12.5, 16, 13, 13, 12.5, 11];
-    const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:F${tot + 2}"/><sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="${H}" topLeftCell="A${first}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join("")}</cols><sheetData>${rows.join("")}</sheetData><mergeCells count="1"><mergeCell ref="A1:F1"/></mergeCells><pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="portrait" fitToHeight="1" fitToWidth="1"/></worksheet>`;
+    out.push(row(tot, [S(`A${tot}`, "RAZEM", 16), E(`B${tot}`, 18),
+      `<c r="C${tot}" s="17"><f>SUM(C${top}:C${bottom})</f><v>${total / 1440}</v></c>`], 20));
+    const now = new Date(snap.at || Date.now());
+    out.push(row(tot + 2, [S(`A${tot + 2}`, `Wygenerowano ${ddmm(now)}.${now.getFullYear()} ${hhmm(now.getTime())} w aplikacji Czas pracy.`, 19)]));
+    const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:C${tot + 2}"/><sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="${H}" topLeftCell="A${top}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols><col min="1" max="1" width="14" customWidth="1"/><col min="2" max="2" width="18" customWidth="1"/><col min="3" max="3" width="14" customWidth="1"/></cols><sheetData>${out.join("")}</sheetData><mergeCells count="1"><mergeCell ref="A1:C1"/></mergeCells><pageMargins left="0.6" right="0.6" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="portrait" fitToHeight="1" fitToWidth="1"/></worksheet>`;
     const xf = (n, f, fi, b, al) => `<xf numFmtId="${n}" fontId="${f}" fillId="${fi}" borderId="${b}" xfId="0"${n ? ' applyNumberFormat="1"' : ""}${f ? ' applyFont="1"' : ""}${fi ? ' applyFill="1"' : ""}${b ? ' applyBorder="1"' : ""}${al ? ` applyAlignment="1"><alignment horizontal="${al}" vertical="center"/></xf>` : "/>"}`;
-    const xfs = [xf(0,0,0,0), xf(0,2,0,0), xf(0,1,0,0), xf(0,3,2,1,"center"), xf(164,0,0,1,"center"), xf(0,0,0,1), xf(165,0,0,1,"center"), xf(166,0,0,1,"center"), xf(167,0,0,1,"center"),
-      xf(164,4,3,1,"center"), xf(0,4,3,1), xf(165,4,3,1,"center"), xf(166,4,3,1,"center"), xf(167,4,3,1,"center"), xf(0,1,4,1), xf(166,1,4,1,"center"), xf(167,1,4,1,"center"), xf(0,1,4,1), xf(0,4,0,0)];
+    // numFmt 164 data, 166 czas [h]:mm · font 0 zwykły, 1 pogrubiony, 2 tytuł, 3 biały, 4 szary
+    // fill 2 nagłówek, 3 weekend, 4 suma, 5 prognoza
+    const xfs = [
+      xf(0,0,0,0), xf(0,2,0,0), xf(0,1,0,0), xf(0,3,2,1,"center"),
+      xf(164,0,0,1,"center"), xf(0,0,0,1), xf(166,0,0,1,"center"), xf(0,0,0,1,"center"),      // 4–7 zwykły dzień
+      xf(164,4,3,1,"center"), xf(0,4,3,1), xf(166,4,3,1,"center"), xf(0,4,3,1,"center"),      // 8–11 weekend
+      xf(164,0,5,1,"center"), xf(0,0,5,1), xf(166,0,5,1,"center"), xf(0,0,5,1,"center"),      // 12–15 prognoza
+      xf(0,1,4,1), xf(166,1,4,1,"center"), xf(0,1,4,1),                                        // 16–18 RAZEM
+      xf(0,4,0,0), xf(0,0,5,1,"center"),                                                       // 19 opis, 20 legenda
+    ];
     const font = (b, sz, col) => `<font>${b ? "<b/>" : ""}<sz val="${sz}"/>${col ? `<color rgb="${col}"/>` : '<color theme="1"/>'}<name val="Calibri"/><family val="2"/></font>`;
     const fill = (c) => `<fill><patternFill patternType="solid"><fgColor rgb="${c}"/><bgColor indexed="64"/></patternFill></fill>`;
-    const bc = '<color rgb="FFD0D7DE"/>';
-    const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="4"><numFmt numFmtId="164" formatCode="dd\\.mm\\.yyyy"/><numFmt numFmtId="165" formatCode="hh:mm"/><numFmt numFmtId="166" formatCode="[h]:mm"/><numFmt numFmtId="167" formatCode="0.00"/></numFmts><fonts count="5">${font(0,11)}${font(1,11)}${font(1,16,"FFC2366F")}${font(1,11,"FFFFFFFF")}${font(0,10,"FF7F7F7F")}</fonts><fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>${fill("FFC2366F")}${fill("FFF2F2F2")}${fill("FFFCE4EE")}</fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin">${bc}</left><right style="thin">${bc}</right><top style="thin">${bc}</top><bottom style="thin">${bc}</bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${xfs.length}">${xfs.join("")}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+    const bc = '<color rgb="FFE3D3DA"/>';
+    const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="dd\\.mm\\.yyyy"/><numFmt numFmtId="166" formatCode="[h]:mm"/></numFmts><fonts count="5">${font(0,11)}${font(1,11)}${font(1,16,"FFC2366F")}${font(1,11,"FFFFFFFF")}${font(0,10,"FF8A8A8A")}</fonts><fills count="6"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>${fill("FFC2366F")}${fill("FFF3F3F3")}${fill("FFE9EBEF")}${fill("FFFADDEA")}</fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin">${bc}</left><right style="thin">${bc}</right><top style="thin">${bc}</top><bottom style="thin">${bc}</bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${xfs.length}">${xfs.join("")}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
     return makeZip([
       ["[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'],
       ["_rels/.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
-      ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${ym}" sheetId="1" r:id="rId1"/></sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>`],
+      ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${isCorr ? "Korekta " : ""}${snap.ym}" sheetId="1" r:id="rId1"/></sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>`],
       ["xl/_rels/workbook.xml.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'],
       ["xl/styles.xml", styles],
       ["xl/worksheets/sheet1.xml", sheet]
     ]);
   }
 
+  // ---------- rozliczenie: wysyłka i archiwum ----------
   function note(text, kind) { const n = $("exportNote"); n.textContent = text; n.className = "note" + (kind ? " " + kind : ""); }
 
-  async function shareOrSave(blob, filename, noteFn) {
-    const file = new File([blob], filename, { type: blob.type });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: filename }); noteFn("Gotowe.", "ok"); return true; }
-      catch (e) { if (e && e.name === "AbortError") { noteFn("Anulowano."); return false; } }
+  // true = wysłano/zapisano, false = anulowano
+  async function shareFiles(files) {
+    if (navigator.canShare && navigator.canShare({ files })) {
+      try { await navigator.share({ files }); return true; }
+      catch (e) { if (e && e.name === "AbortError") return false; }
     }
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-    noteFn("Plik zapisany w Pobranych.", "ok");
+    for (const f of files) {
+      const url = URL.createObjectURL(f);
+      const a = document.createElement("a");
+      a.href = url; a.download = f.name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    }
     return true;
   }
+  const filesOf = (entry) => [entry.main, entry.corr].map(snap => new File([buildXlsx(snap)], fileName(snap), { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
 
-  async function exportXlsx() {
-    const ym = $("month").value;
-    try {
-      const blob = await buildXlsx(ym);
-      const nm = state.name.trim();
-      const filename = `Czas pracy ${ym}${nm ? " " + nm : ""}.xlsx`.replace(/[\\/:*?"<>|]/g, "_");
-      await shareOrSave(blob, filename, note);
-    } catch (e) { note("Nie udało się przygotować pliku. Użyj „Kopiuj tabelę”.", "err"); }
+  function sendWindow(now) {
+    const today = startOfDay(now);
+    const ym = ymOf(today), prev = ymOf(new Date(today.getFullYear(), today.getMonth() - 1, 1));
+    const open = today.getDate() >= SEND_FROM_DAY;
+    const corrFrom = (state.sent[prev] && state.sent[prev].forecastFrom) || 16;
+    return { today, ym, prev, open, corrFrom };
+  }
+  function renderSend() {
+    const w = sendWindow(new Date());
+    const m = ymDate(w.ym), pm = ymDate(w.prev);
+    const btn = $("send");
+    btn.disabled = !w.open;
+    if (!w.open) {
+      $("sendInfo").textContent = `Rozliczenie za ${MONTHS[m.getMonth()]} będzie dostępne od ${SEND_FROM_DAY} ${MONTHS_GEN[m.getMonth()]}.`;
+    } else {
+      const sent = state.sent[w.ym];
+      const yest = addDays(w.today, -1);
+      $("sendInfo").textContent =
+        `Dwa pliki: ${MONTHS[m.getMonth()]} – faktyczne godziny ` + (w.today.getDate() > 1 ? `do ${ddmm(yest)}` : "jeszcze brak") + `, prognoza od ${ddmm(w.today)}; ` +
+        `korekta za ${MONTHS[pm.getMonth()]} od ${pad(w.corrFrom)}.${pad(pm.getMonth() + 1)}.` +
+        (sent ? ` Wysłano ${ddmm(new Date(sent.at))} o ${hhmm(sent.at)} – możesz wysłać ponownie.` : "");
+    }
+    renderArchive();
+  }
+  async function sendReport() {
+    const w = sendWindow(new Date());
+    if (!w.open) return;
+    const at = Date.now(), name = state.name.trim();
+    const entry = {
+      at, forecastFrom: w.today.getDate(),
+      main: { kind: "main", ym: w.ym, at, name, rows: mainRows(w.ym, w.today) },
+      corr: { kind: "corr", ym: w.prev, at, name, rows: corrRows(w.prev, w.corrFrom) },
+    };
+    let ok;
+    try { ok = await shareFiles(filesOf(entry)); }
+    catch (e) { note("Nie udało się przygotować plików. Spróbuj jeszcze raz.", "err"); return; }
+    if (!ok) { note("Anulowano – nic nie zostało wysłane."); return; }
+    state.sent[w.ym] = entry;
+    commit();
+    note("Gotowe. Kopia rozliczenia jest w „Wcześniejsze rozliczenia”.", "ok");
+    pushSync();
+    uploadReport(entry);
+  }
+  let archiveOpen = false;
+  function renderArchive() {
+    const toggle = $("archiveToggle"), ul = $("archive");
+    toggle.textContent = archiveOpen ? "Ukryj wcześniejsze rozliczenia" : "Wcześniejsze rozliczenia";
+    toggle.setAttribute("aria-expanded", String(archiveOpen));
+    ul.hidden = !archiveOpen;
+    if (!archiveOpen) return;
+    const keys = Object.keys(state.sent).sort().reverse();
+    if (!keys.length) { ul.innerHTML = `<li class="empty">Jeszcze nic nie wysłano. Tu pojawi się każde rozliczenie, żeby można je było pobrać jeszcze raz.</li>`; return; }
+    ul.innerHTML = keys.map(k => {
+      const e = state.sent[k], m = ymDate(k), pm = ymDate(e.corr.ym);
+      return `<li><div><b>${cap(MONTHS[m.getMonth()])} ${m.getFullYear()}</b><small>wysłane ${ddmm(new Date(e.at))} · czas pracy + korekta za ${MONTHS[pm.getMonth()]}</small></div>
+        <button type="button" data-again="${k}">Pobierz</button></li>`;
+    }).join("");
+  }
+  async function sendAgain(k) {
+    const e = state.sent[k];
+    if (!e) return;
+    try { if (await shareFiles(filesOf(e))) note("Gotowe – to te same pliki, które zostały wtedy wysłane.", "ok"); }
+    catch (err) { note("Nie udało się przygotować plików.", "err"); }
   }
 
   // ---------- zapis na GitHubie ----------
@@ -665,15 +775,19 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
   try { sync = JSON.parse(localStorage.getItem(SYNC_KEY)) || {}; } catch (e) { sync = {}; }
   const saveSync = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify(sync)); } catch (e) {} };
   const syncOn = () => !!(sync.token && sync.repo);
-  let syncing = false;
+  // Zapisy na GitHubie idą po kolei, żeby się nie nadpisywały.
+  let ghQueue = Promise.resolve();
+  const ghTask = (fn) => (ghQueue = ghQueue.then(fn, fn));
+  const COMMITTER = { name: "Kuba", email: "kubask212@users.noreply.github.com" };
 
   const b64enc = (str) => { const b = new TextEncoder().encode(str); let bin = ""; for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(bin); };
   const b64dec = (str) => new TextDecoder().decode(Uint8Array.from(atob(str.replace(/\s/g, "")), (c) => c.charCodeAt(0)));
   const hasData = (st) => st.sessions.length > 0 || Object.keys(st.overrides).length > 0 || st.current != null;
 
-  function gh(method, body, cfg) {
+  function gh(method, body, cfg, path) {
     cfg = cfg || sync;
-    return fetch(`https://api.github.com/repos/${cfg.repo}/contents/${SYNC_FILE}`, {
+    path = (path || SYNC_FILE).split("/").map(encodeURIComponent).join("/");
+    return fetch(`https://api.github.com/repos/${cfg.repo}/contents/${path}`, {
       method, cache: "no-store",
       headers: Object.assign({ Authorization: `Bearer ${cfg.token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" }, body ? { "Content-Type": "application/json" } : {}),
       body: body ? JSON.stringify(body) : undefined,
@@ -705,11 +819,11 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
       $("storeInfo").textContent = "Dane zapisane w tym telefonie.";
     }
   }
-  const dataOnly = () => ({ sessions: state.sessions, current: state.current, paused: state.paused, overrides: state.overrides, name: state.name, updatedAt: state.updatedAt });
+  const dataOnly = () => ({ sessions: state.sessions, current: state.current, paused: state.paused, overrides: state.overrides, name: state.name, sent: state.sent, updatedAt: state.updatedAt });
 
-  async function pushSync() {
-    if (!syncOn() || syncing) return;
-    syncing = true;
+  function pushSync() { return ghTask(doPush); }
+  async function doPush() {
+    if (!syncOn()) return;
     snote("Zapisuję na GitHubie…");
     try {
       let sha;
@@ -717,7 +831,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
       if (g.status === 200) sha = (await g.json()).sha;
       else if (g.status !== 404) throw g;
       const body = { message: `Godziny – ${dayKey(new Date())} ${hhmm(Date.now())}`, content: b64enc(JSON.stringify(dataOnly(), null, 1)),
-        committer: { name: "Kuba", email: "kubask212@users.noreply.github.com" }, author: { name: "Kuba", email: "kubask212@users.noreply.github.com" } };
+        committer: COMMITTER, author: COMMITTER };
       if (sha) body.sha = sha;
       const r = await gh("PUT", body);
       if (!r.ok) throw r;
@@ -728,9 +842,47 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
     } catch (e) {
       snote(syncError(e), "err");
     } finally {
-      syncing = false;
       renderSync();
     }
+  }
+
+  // Każde wysłane rozliczenie trafia też na GitHuba jako gotowe pliki Excel: rozliczenia/2026-11/…
+  // Foldery starsze niż rok są przy okazji usuwane.
+  const blobB64 = async (blob) => { const b = new Uint8Array(await blob.arrayBuffer()); let bin = ""; for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(bin); };
+  async function putFile(path, contentB64, message) {
+    const g = await gh("GET", null, null, path);
+    let sha;
+    if (g.status === 200) sha = (await g.json()).sha; else if (g.status !== 404) throw g;
+    const body = { message, content: contentB64, committer: COMMITTER, author: COMMITTER };
+    if (sha) body.sha = sha;
+    const r = await gh("PUT", body, null, path);
+    if (!r.ok) throw r;
+  }
+  function uploadReport(entry) {
+    return ghTask(async () => {
+      if (!syncOn()) return;
+      try {
+        for (const snap of [entry.main, entry.corr]) {
+          const file = snap.kind === "corr" ? `korekta-${snap.ym}.xlsx` : `czas-pracy-${snap.ym}.xlsx`;
+          await putFile(`rozliczenia/${entry.main.ym}/${file}`, await blobB64(buildXlsx(snap)), `Rozliczenie ${entry.main.ym} – ${file}`);
+        }
+        const cutoff = ymOf(new Date(new Date().getFullYear(), new Date().getMonth() - KEEP_MONTHS, 1));
+        const list = await gh("GET", null, null, "rozliczenia");
+        if (list.ok) {
+          for (const dir of await list.json()) {
+            if (dir.type !== "dir" || dir.name >= cutoff) continue;
+            const files = await gh("GET", null, null, dir.path);
+            if (!files.ok) continue;
+            for (const f of await files.json()) {
+              await gh("DELETE", { message: `Usunięto stare rozliczenie ${f.path}`, sha: f.sha, committer: COMMITTER, author: COMMITTER }, null, f.path);
+            }
+          }
+        }
+        snote("Rozliczenie zapisane też na GitHubie (folder „rozliczenia”).", "ok");
+      } catch (e) {
+        snote("Nie udało się zapisać plików rozliczenia na GitHubie. Godziny są bezpieczne; pliki możesz pobrać z „Wcześniejsze rozliczenia”.", "err");
+      }
+    });
   }
   // raz dziennie, jeśli coś się zmieniło (dodatkowo zapis po „Koniec pracy” i po korekcie)
   function maybeSync() {
@@ -743,7 +895,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
     if (!cfg.token) { snote("Wklej klucz dostępu z GitHuba.", "err"); return; }
     snote("Łączę z GitHubem…");
     try {
-      const g = await gh("GET", null, cfg);
+      const g = await gh("GET", null, cfg, SYNC_FILE);
       let remote = null;
       if (g.status === 200) remote = normalize(JSON.parse(b64dec((await g.json()).content)));
       else if (g.status !== 404) throw g;
@@ -770,37 +922,6 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
   function disconnect() {
     if (!window.confirm("Odłączyć zapis na GitHubie? Godziny zostaną w telefonie, a te już zapisane na GitHubie nie znikną.")) return;
     sync = {}; saveSync(); snote(""); renderSync();
-  }
-
-  function tableText(ym) {
-    const [y, mo] = ym.split("-").map(Number);
-    const days = summarize(new Date(y, mo - 1, 1), new Date(y, mo, 0), Date.now());
-    const lines = ["Data\tDzień tygodnia\tRozpoczęcie\tZakończenie\tCzas pracy\tGodziny"];
-    let total = 0, totalRounded = 0;
-    for (const d of days) {
-      const has = d.minutes > 0 || d.override != null;
-      total += d.minutes;
-      lines.push([`${pad(d.date.getDate())}.${pad(d.date.getMonth() + 1)}.${d.date.getFullYear()}`, DAYS[d.date.getDay()], d.first || "", d.last || "",
-        has ? hm(d.minutes) : "", has ? quarterHours(d.minutes).toFixed(2).replace(".", ",") : ""].join("\t"));
-      if (has) totalRounded += quarterHours(d.minutes);
-    }
-    lines.push(["RAZEM", "", "", "", hm(total), totalRounded.toFixed(2).replace(".", ",")].join("\t"));
-    return lines.join("\n");
-  }
-  function copyTable() {
-    const text = tableText($("month").value);
-    const ok = () => note("Skopiowano. Wklej w Excelu, Numbers albo w treści maila.", "ok");
-    try {
-      navigator.clipboard.writeText(text).then(ok, () => fallbackCopy(text, ok));
-    } catch (e) { fallbackCopy(text, ok); }
-  }
-  function fallbackCopy(text, ok) {
-    const ta = document.createElement("textarea");
-    ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
-    document.body.appendChild(ta); ta.select();
-    let done = false; try { done = document.execCommand("copy"); } catch (e) {}
-    ta.remove();
-    if (done) ok(); else note("Nie udało się skopiować. Spróbuj „Pobierz Excel”.", "err");
   }
 
   // ---------- nie wygaszaj ekranu ----------
@@ -831,8 +952,10 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
   $("fixRemove").addEventListener("click", removeFix);
   $("sheetBg").addEventListener("click", (e) => { if (e.target === $("sheetBg")) closeFix(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("sheetBg").hidden) closeFix(); });
-  $("xlsx").addEventListener("click", exportXlsx);
-  $("copy").addEventListener("click", copyTable);
+  $("send").addEventListener("click", sendReport);
+  $("archiveToggle").addEventListener("click", () => { archiveOpen = !archiveOpen; renderArchive(); });
+  $("archive").addEventListener("click", (e) => { const b = e.target.closest("[data-again]"); if (b) sendAgain(b.dataset.again); });
+  $("moreDays").addEventListener("click", () => { showAllDays = !showAllDays; renderDays(); });
   $("syncConnect").addEventListener("click", connect);
   $("syncNow").addEventListener("click", pushSync);
   $("syncOff").addEventListener("click", disconnect);

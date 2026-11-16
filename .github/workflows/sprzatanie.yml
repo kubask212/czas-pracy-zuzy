@@ -1,0 +1,25 @@
+# Raz w miesiącu usuwa z historii repozytorium zmiany starsze niż rok.
+# Pliki zostają takie, jakie są teraz – znika tylko stara historia zapisów.
+name: Sprzątanie starej historii
+
+on:
+  schedule:
+    - cron: "17 3 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sprzatanie
+
+jobs:
+  sprzatanie:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Usuń historię starszą niż rok
+        run: bash .github/sprzatanie.sh
