@@ -131,6 +131,14 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
 .archive small { color: var(--muted); font-size: 13px; }
 .archive button { background: var(--go-soft); color: var(--navy); font-weight: 600; font-size: 14px; border-radius: 10px; padding: 8px 12px; flex: none; }
 .archive .empty { padding: 12px 0; text-align: left; }
+.adj { display: flex; flex-direction: column; gap: 8px; }
+.adj-head { font-weight: 600; font-size: 15px; }
+.adj-row { display: grid; grid-template-columns: minmax(0, 1.6fr) 56px minmax(0, 1fr) minmax(0, 1fr) 36px; gap: 6px; align-items: center; }
+.adj-row select, .adj-row input { width: 100%; min-width: 0; padding: 10px 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); min-height: 44px; font-size: 15px; }
+.adj-row .x { background: none; color: var(--muted); font-size: 22px; line-height: 1; padding: 6px; }
+.adj-cap { display: grid; grid-template-columns: minmax(0, 1.6fr) 56px minmax(0, 1fr) minmax(0, 1fr) 36px; gap: 6px; font-size: 12px; color: var(--muted); }
+.adj-sum { font-size: 15px; }
+.adj-sum b { font-variant-numeric: tabular-nums; }
 .hint { color: var(--muted); font-size: 14px; margin: 0 4px; }
 
 .export { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
@@ -195,6 +203,14 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
   <h2>Rozliczenie</h2>
   <div class="panel export">
     <p class="hint" style="margin:0" id="sendInfo"></p>
+    <div class="adj" id="adjBox" hidden>
+      <div class="adj-head">Wyrównania za poprzednie miesiące</div>
+      <p class="hint" style="margin:0" id="adjInfo"></p>
+      <div class="adj-cap" aria-hidden="true"><span>miesiąc</span><span>znak</span><span>godz.</span><span>min</span><span></span></div>
+      <div id="adjRows"></div>
+      <button type="button" class="more" id="adjAdd" style="text-align:left;padding-left:0">+ Dodaj wyrównanie</button>
+      <div class="adj-sum" id="adjSum"></div>
+    </div>
     <button type="button" class="btn excel" id="send">Wyślij rozliczenie</button>
     <div class="note" id="exportNote"></div>
     <div class="field">
@@ -269,12 +285,14 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
   const FORECAST_DEFAULT = 420; // 7:00 (8:00–15:00), gdy nie ma jeszcze historii
   const DAYS_ON_LIST = 6;
   // sent: wysłane rozliczenia {"2026-11": {at, forecastFrom, main, corr}} – dokładne kopie plików
-  let state = { sessions: [], current: null, paused: false, overrides: {}, name: "", sent: {}, updatedAt: 0 };
+  // adj: wyrównania wpisane/poprawione ręcznie {"2026-11": [{ym: "2026-10", min: -670}]}
+  let state = { sessions: [], current: null, paused: false, overrides: {}, name: "", sent: {}, adj: {}, updatedAt: 0 };
 
   const $ = (id) => document.getElementById(id);
   const pad = (n) => String(n).padStart(2, "0");
   const DAYS = ["niedziela", "poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota"];
   const MONTHS = ["styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec", "lipiec", "sierpień", "wrzesień", "październik", "listopad", "grudzień"];
+  const MONTHS_SHORT = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"];
   const MONTHS_GEN = ["stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia", "września", "października", "listopada", "grudnia"];
 
   const dayKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -325,6 +343,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
       overrides: (s && typeof s.overrides === "object" && s.overrides) || {},
       name: (s && typeof s.name === "string") ? s.name : "",
       sent: (s && typeof s.sent === "object" && s.sent && !Array.isArray(s.sent)) ? s.sent : {},
+      adj: (s && typeof s.adj === "object" && s.adj && !Array.isArray(s.adj)) ? s.adj : {},
       updatedAt: (s && s.updatedAt) || 0,
     };
   }
@@ -341,6 +360,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
     for (const k of Object.keys(state.overrides)) if (keyToDate(k).getTime() < cutoff) delete state.overrides[k];
     const sentCutoff = ymOf(showFrom(now));
     for (const k of Object.keys(state.sent)) if (k < sentCutoff) delete state.sent[k];
+    for (const k of Object.keys(state.adj)) if (k < sentCutoff) delete state.adj[k];
   }
 
   // ---------- liczenie ----------
@@ -611,10 +631,33 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
       return { d: d.key, min: fc(d.date.getDay()), x: false, f: true };
     });
   }
-  function corrRows(ym, fromDay) {
-    const m = ymDate(ym);
-    return summarize(new Date(m.getFullYear(), m.getMonth(), fromDay), new Date(m.getFullYear(), m.getMonth() + 1, 0), Date.now()).map(actualRow);
+  // Wyrównanie za miesiąc = faktyczne godziny w dniach, które były w wysłanej prognozie, minus ta prognoza.
+  // null, gdy apka nie zna wysłanej prognozy (np. miesiące sprzed używania apki) – wtedy wpisuje się ręcznie.
+  function autoAdj(ym) {
+    const e = state.sent[ym];
+    if (!e || !e.main || !Array.isArray(e.main.rows)) return null;
+    let diff = 0;
+    for (const x of e.main.rows) {
+      if (!x.f) continue;
+      const d = keyToDate(x.d);
+      diff += (actualRow(summarize(d, d, Date.now())[0]).min || 0) - (x.min || 0);
+    }
+    return diff;
   }
+  // Format jak u HR: -3 h, -11h10min, +45min, 144h20min
+  function fmtHm(min, signed) {
+    const sign = min < 0 ? "-" : signed ? "+" : "";
+    const a = Math.abs(Math.round(min)), h = Math.floor(a / 60), m = a % 60;
+    return sign + (m === 0 ? `${h} h` : h === 0 ? `${m}min` : `${h}h${m}min`);
+  }
+  const ADJ_MONTHS_BACK = 6;
+  // Wyrównania do pliku za `ym`: zapisane ręcznie albo domyślnie – za poprzedni miesiąc (policzone, jeśli się da)
+  function currentAdj(ym) {
+    if (state.adj[ym]) return state.adj[ym].map(a => ({ ...a }));
+    const m = ymDate(ym), prev = ymOf(new Date(m.getFullYear(), m.getMonth() - 1, 1));
+    return [{ ym: prev, min: autoAdj(prev), auto: true }];
+  }
+
   function fileName(snap) {
     const m = ymDate(snap.ym), what = snap.kind === "corr" ? "korekta" : "czas pracy";
     const base = `${what} ${MONTHS[m.getMonth()]} ${m.getFullYear()}`;
@@ -655,9 +698,23 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
     }
     out.push(row(tot, [S(`A${tot}`, "RAZEM", 16), E(`B${tot}`, 18),
       `<c r="C${tot}" s="17"><f>SUM(C${top}:C${bottom})</f><v>${total / 1440}</v></c>`], 20));
+    const merges = ["A1:C1"];
+    let next = tot + 2;
+    const adj = (snap.adj || []).filter(a => typeof a.min === "number");
+    if (adj.length) {
+      for (const a of adj.slice().sort((p, q) => p.ym < q.ym ? -1 : 1)) {
+        out.push(row(next, [S(`A${next}`, `wyrównanie za ${MONTHS[ymDate(a.ym).getMonth()]}: ${fmtHm(a.min, false)}`, 21)]));
+        merges.push(`A${next}:C${next}`); next++;
+      }
+      next++;
+      const after = total + adj.reduce((t, a) => t + a.min, 0);
+      out.push(row(next, [S(`A${next}`, `suma po korekcie godzin z poprzednich miesięcy: ${fmtHm(after, false)}`, 22)], 20));
+      merges.push(`A${next}:C${next}`); next += 2;
+    }
     const now = new Date(snap.at || Date.now());
-    out.push(row(tot + 2, [S(`A${tot + 2}`, `Wygenerowano ${ddmm(now)}.${now.getFullYear()} ${hhmm(now.getTime())} w aplikacji Czas pracy.`, 19)]));
-    const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:C${tot + 2}"/><sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="${H}" topLeftCell="A${top}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols><col min="1" max="1" width="14" customWidth="1"/><col min="2" max="2" width="18" customWidth="1"/><col min="3" max="3" width="14" customWidth="1"/></cols><sheetData>${out.join("")}</sheetData><mergeCells count="1"><mergeCell ref="A1:C1"/></mergeCells><pageMargins left="0.6" right="0.6" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="portrait" fitToHeight="1" fitToWidth="1"/></worksheet>`;
+    const info = next;
+    out.push(row(info, [S(`A${info}`, `Wygenerowano ${ddmm(now)}.${now.getFullYear()} ${hhmm(now.getTime())} w aplikacji Czas pracy.`, 19)]));
+    const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:C${info}"/><sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="${H}" topLeftCell="A${top}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols><col min="1" max="1" width="14" customWidth="1"/><col min="2" max="2" width="24" customWidth="1"/><col min="3" max="3" width="20" customWidth="1"/></cols><sheetData>${out.join("")}</sheetData><mergeCells count="${merges.length}">${merges.map(r => `<mergeCell ref="${r}"/>`).join("")}</mergeCells><pageMargins left="0.6" right="0.6" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="portrait" fitToHeight="1" fitToWidth="1"/></worksheet>`;
     const xf = (n, f, fi, b, al) => `<xf numFmtId="${n}" fontId="${f}" fillId="${fi}" borderId="${b}" xfId="0"${n ? ' applyNumberFormat="1"' : ""}${f ? ' applyFont="1"' : ""}${fi ? ' applyFill="1"' : ""}${b ? ' applyBorder="1"' : ""}${al ? ` applyAlignment="1"><alignment horizontal="${al}" vertical="center"/></xf>` : "/>"}`;
     // numFmt 164 data, 166 czas [h]:mm · font 0 zwykły, 1 pogrubiony, 2 tytuł, 3 biały, 4 szary
     // fill 2 nagłówek, 3 weekend, 4 suma, 5 prognoza
@@ -668,6 +725,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
       xf(164,0,5,1,"center"), xf(0,0,5,1), xf(166,0,5,1,"center"), xf(0,0,5,1,"center"),      // 12–15 prognoza
       xf(0,1,4,1), xf(166,1,4,1,"center"), xf(0,1,4,1),                                        // 16–18 RAZEM
       xf(0,4,0,0), xf(0,0,5,1,"center"),                                                       // 19 opis, 20 legenda
+      xf(0,0,0,0,"left"), xf(0,1,0,0,"left"),                                                 // 21 wyrównanie, 22 suma po korekcie
     ];
     const font = (b, sz, col) => `<font>${b ? "<b/>" : ""}<sz val="${sz}"/>${col ? `<color rgb="${col}"/>` : '<color theme="1"/>'}<name val="Calibri"/><family val="2"/></font>`;
     const fill = (c) => `<fill><patternFill patternType="solid"><fgColor rgb="${c}"/><bgColor indexed="64"/></patternFill></fill>`;
@@ -700,44 +758,107 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
     }
     return true;
   }
-  const filesOf = (entry) => [entry.main, entry.corr].map(snap => new File([buildXlsx(snap)], fileName(snap), { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  const filesOf = (entry) => [entry.main, entry.corr].filter(Boolean).map(snap => new File([buildXlsx(snap)], fileName(snap), { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
 
   function sendWindow(now) {
     const today = startOfDay(now);
     const ym = ymOf(today), prev = ymOf(new Date(today.getFullYear(), today.getMonth() - 1, 1));
-    const open = today.getDate() >= SEND_FROM_DAY;
-    const corrFrom = (state.sent[prev] && state.sent[prev].forecastFrom) || 16;
-    return { today, ym, prev, open, corrFrom };
+    return { today, ym, prev, open: today.getDate() >= SEND_FROM_DAY };
   }
   function renderSend() {
     const w = sendWindow(new Date());
-    const m = ymDate(w.ym), pm = ymDate(w.prev);
-    const btn = $("send");
-    btn.disabled = !w.open;
+    const m = ymDate(w.ym);
+    $("send").disabled = !w.open;
+    $("adjBox").hidden = !w.open;
     if (!w.open) {
       $("sendInfo").textContent = `Rozliczenie za ${MONTHS[m.getMonth()]} będzie dostępne od ${SEND_FROM_DAY} ${MONTHS_GEN[m.getMonth()]}.`;
     } else {
       const sent = state.sent[w.ym];
-      const yest = addDays(w.today, -1);
       $("sendInfo").textContent =
-        `Dwa pliki: ${MONTHS[m.getMonth()]} – faktyczne godziny ` + (w.today.getDate() > 1 ? `do ${ddmm(yest)}` : "jeszcze brak") + `, prognoza od ${ddmm(w.today)}; ` +
-        `korekta za ${MONTHS[pm.getMonth()]} od ${pad(w.corrFrom)}.${pad(pm.getMonth() + 1)}.` +
-        (sent ? ` Wysłano ${ddmm(new Date(sent.at))} o ${hhmm(sent.at)} – możesz wysłać ponownie.` : "");
+        `Plik za ${MONTHS[m.getMonth()]}: faktyczne godziny ` + (w.today.getDate() > 1 ? `do ${ddmm(addDays(w.today, -1))}` : "jeszcze brak") +
+        `, prognoza od ${ddmm(w.today)}.` + (sent ? ` Wysłano ${ddmm(new Date(sent.at))} o ${hhmm(sent.at)} – możesz wysłać ponownie.` : "");
+      renderAdj(w);
     }
     renderArchive();
   }
+
+  // ---------- wyrównania: edycja przed wysyłką ----------
+  function monthOptions(ym, sel) {
+    const m = ymDate(ym), opts = [];
+    for (let i = 1; i <= ADJ_MONTHS_BACK; i++) {
+      const k = ymOf(new Date(m.getFullYear(), m.getMonth() - i, 1)), mm = ymDate(k);
+      opts.push(`<option value="${k}"${k === sel ? " selected" : ""}>${MONTHS_SHORT[mm.getMonth()]} ${mm.getFullYear()}</option>`);
+    }
+    return opts.join("");
+  }
+  function renderAdj(w) {
+    if ($("adjBox").contains(document.activeElement) && document.activeElement.tagName !== "BUTTON") return; // nie przerywaj pisania
+    const list = currentAdj(w.ym);
+    const a0 = list.find(a => a.auto);
+    $("adjInfo").textContent = a0 && a0.min == null
+      ? `Apka nie zna prognozy wysłanej za ${MONTHS[ymDate(a0.ym).getMonth()]} – wpisz wyrównanie (np. podane przez HR) albo usuń wiersz.`
+      : a0 ? `Za ${MONTHS[ymDate(a0.ym).getMonth()]} policzone samo: przepracowane godziny minus wysłana prognoza. Możesz poprawić.`
+      : "Wpisane ręcznie. Minus = w prognozie było więcej niż faktycznie.";
+    $("adjRows").innerHTML = list.map((a, i) => {
+      const v = a.min == null ? null : Math.abs(a.min);
+      return `<div class="adj-row" data-i="${i}">
+        <select aria-label="Miesiąc" data-f="ym">${monthOptions(w.ym, a.ym)}</select>
+        <select aria-label="Znak" data-f="sign"><option value="-"${a.min == null || a.min <= 0 ? " selected" : ""}>−</option><option value="+"${a.min > 0 ? " selected" : ""}>+</option></select>
+        <input aria-label="Godziny" data-f="h" type="number" inputmode="numeric" min="0" max="300" value="${v == null ? "" : Math.floor(v / 60)}" placeholder="0">
+        <input aria-label="Minuty" data-f="m" type="number" inputmode="numeric" min="0" max="59" value="${v == null ? "" : v % 60}" placeholder="0">
+        <button type="button" class="x" data-del="${i}" aria-label="Usuń wyrównanie">×</button>
+      </div>`;
+    }).join("");
+    renderAdjSum(w);
+  }
+  function renderAdjSum(w) {
+    const list = currentAdj(w.ym).filter(a => typeof a.min === "number");
+    if (!list.length) { $("adjSum").textContent = "Bez wyrównań – w pliku będzie tylko RAZEM."; return; }
+    const total = mainRows(w.ym, w.today).reduce((t, x) => t + (x.min || 0), 0);
+    const after = total + list.reduce((t, a) => t + a.min, 0);
+    $("adjSum").innerHTML = `RAZEM ${hm(total)} · po wyrównaniach: <b>${fmtHm(after, false)}</b>`;
+  }
+  function readAdjRows() {
+    return [...$("adjRows").querySelectorAll(".adj-row")].map(r => {
+      const h = r.querySelector('[data-f="h"]').value, m = r.querySelector('[data-f="m"]').value;
+      const empty = h === "" && m === "";
+      const min = (parseInt(h || "0", 10) || 0) * 60 + Math.min(59, parseInt(m || "0", 10) || 0);
+      return { ym: r.querySelector('[data-f="ym"]').value, min: empty ? null : (r.querySelector('[data-f="sign"]').value === "-" ? -min : min) };
+    });
+  }
+  let adjTimer = null;
+  function adjChanged() {
+    const w = sendWindow(new Date());
+    state.adj[w.ym] = readAdjRows();
+    renderAdjSum(w);
+    clearTimeout(adjTimer);
+    adjTimer = setTimeout(() => { state.updatedAt = Date.now(); saveLocal(); }, 400);
+  }
+  function adjAdd() {
+    const w = sendWindow(new Date());
+    const list = readAdjRows();
+    const used = new Set(list.map(a => a.ym));
+    let k = null;
+    for (let i = 1; i <= ADJ_MONTHS_BACK && !k; i++) { const c = ymOf(new Date(ymDate(w.ym).getFullYear(), ymDate(w.ym).getMonth() - i, 1)); if (!used.has(c)) k = c; }
+    list.push({ ym: k || w.prev, min: null });
+    state.adj[w.ym] = list; commit();
+  }
+  function adjDel(i) {
+    const w = sendWindow(new Date());
+    const list = readAdjRows(); list.splice(i, 1);
+    state.adj[w.ym] = list; commit();
+  }
+
   async function sendReport() {
     const w = sendWindow(new Date());
     if (!w.open) return;
+    if (!$("adjBox").hidden && $("adjRows").children.length) state.adj[w.ym] = readAdjRows();
+    const adj = currentAdj(w.ym).filter(a => typeof a.min === "number").map(a => ({ ym: a.ym, min: a.min }));
     const at = Date.now(), name = state.name.trim();
-    const entry = {
-      at, forecastFrom: w.today.getDate(),
-      main: { kind: "main", ym: w.ym, at, name, rows: mainRows(w.ym, w.today) },
-      corr: { kind: "corr", ym: w.prev, at, name, rows: corrRows(w.prev, w.corrFrom) },
-    };
+    const entry = { at, forecastFrom: w.today.getDate(), main: { kind: "main", ym: w.ym, at, name, rows: mainRows(w.ym, w.today), adj } };
     let ok;
     try { ok = await shareFiles(filesOf(entry)); }
-    catch (e) { note("Nie udało się przygotować plików. Spróbuj jeszcze raz.", "err"); return; }
+    catch (e) { note("Nie udało się przygotować pliku. Spróbuj jeszcze raz.", "err"); return; }
     if (!ok) { note("Anulowano – nic nie zostało wysłane."); return; }
     state.sent[w.ym] = entry;
     commit();
@@ -755,8 +876,10 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
     const keys = Object.keys(state.sent).sort().reverse();
     if (!keys.length) { ul.innerHTML = `<li class="empty">Jeszcze nic nie wysłano. Tu pojawi się każde rozliczenie, żeby można je było pobrać jeszcze raz.</li>`; return; }
     ul.innerHTML = keys.map(k => {
-      const e = state.sent[k], m = ymDate(k), pm = ymDate(e.corr.ym);
-      return `<li><div><b>${cap(MONTHS[m.getMonth()])} ${m.getFullYear()}</b><small>wysłane ${ddmm(new Date(e.at))} · czas pracy + korekta za ${MONTHS[pm.getMonth()]}</small></div>
+      const e = state.sent[k], m = ymDate(k);
+      const extra = e.corr ? ` · czas pracy + korekta za ${MONTHS[ymDate(e.corr.ym).getMonth()]}`
+        : (e.main.adj && e.main.adj.length) ? ` · z wyrównaniem za ${e.main.adj.map(a => MONTHS[ymDate(a.ym).getMonth()]).join(" i ")}` : "";
+      return `<li><div><b>${cap(MONTHS[m.getMonth()])} ${m.getFullYear()}</b><small>wysłane ${ddmm(new Date(e.at))}${extra}</small></div>
         <button type="button" data-again="${k}">Pobierz</button></li>`;
     }).join("");
   }
@@ -819,7 +942,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
       $("storeInfo").textContent = "Dane zapisane w tym telefonie.";
     }
   }
-  const dataOnly = () => ({ sessions: state.sessions, current: state.current, paused: state.paused, overrides: state.overrides, name: state.name, sent: state.sent, updatedAt: state.updatedAt });
+  const dataOnly = () => ({ sessions: state.sessions, current: state.current, paused: state.paused, overrides: state.overrides, name: state.name, sent: state.sent, adj: state.adj, updatedAt: state.updatedAt });
 
   function pushSync() { return ghTask(doPush); }
   async function doPush() {
@@ -862,7 +985,7 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
     return ghTask(async () => {
       if (!syncOn()) return;
       try {
-        for (const snap of [entry.main, entry.corr]) {
+        for (const snap of [entry.main, entry.corr].filter(Boolean)) {
           const file = snap.kind === "corr" ? `korekta-${snap.ym}.xlsx` : `czas-pracy-${snap.ym}.xlsx`;
           await putFile(`rozliczenia/${entry.main.ym}/${file}`, await blobB64(buildXlsx(snap)), `Rozliczenie ${entry.main.ym} – ${file}`);
         }
@@ -953,6 +1076,10 @@ h2 { font-size: 18px; font-weight: 700; margin: 6px 4px 0; text-wrap: balance; }
   $("sheetBg").addEventListener("click", (e) => { if (e.target === $("sheetBg")) closeFix(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("sheetBg").hidden) closeFix(); });
   $("send").addEventListener("click", sendReport);
+  $("adjRows").addEventListener("input", adjChanged);
+  $("adjRows").addEventListener("change", adjChanged);
+  $("adjRows").addEventListener("click", (e) => { const b = e.target.closest("[data-del]"); if (b) adjDel(Number(b.dataset.del)); });
+  $("adjAdd").addEventListener("click", adjAdd);
   $("archiveToggle").addEventListener("click", () => { archiveOpen = !archiveOpen; renderArchive(); });
   $("archive").addEventListener("click", (e) => { const b = e.target.closest("[data-again]"); if (b) sendAgain(b.dataset.again); });
   $("moreDays").addEventListener("click", () => { showAllDays = !showAllDays; renderDays(); });
